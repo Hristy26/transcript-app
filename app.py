@@ -122,6 +122,45 @@ html, body, [class*="css"] {
     color: #999;
     margin: 20px 0 8px;
 }
+
+.batch-box {
+    background: #ffffff;
+    border: 1.5px solid #1B3A6B22;
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 16px;
+}
+.batch-header {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #1B3A6B;
+    margin-bottom: 4px;
+}
+.batch-sub {
+    font-size: 0.8rem;
+    color: #999;
+    margin-bottom: 14px;
+}
+.match-chip {
+    display: inline-block;
+    background: #E8F5E9;
+    color: #2E7D32;
+    border-radius: 20px;
+    padding: 2px 10px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    margin: 3px 4px 3px 0;
+}
+.nomatch-chip {
+    display: inline-block;
+    background: #FFF3E0;
+    color: #E65100;
+    border-radius: 20px;
+    padding: 2px 10px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    margin: 3px 4px 3px 0;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -135,10 +174,10 @@ st.markdown("""
 
 # ── Course name detection ─────────────────────────────────────────────────────
 COURSE_KEYWORDS = {
-    "asbestos":      "Asbestos Awareness",
-    "covid":         "COVID-19 for the Construction Workforce",
-    "lead":          "Lead Awareness Worker",
-    "hazard":        "Hazard Communication",
+    "asbestos": "Asbestos Awareness",
+    "covid":    "COVID-19 for the Construction Workforce",
+    "lead":     "Lead Awareness Worker",
+    "hazard":   "Hazard Communication",
 }
 
 def detect_course(filename, df):
@@ -146,7 +185,6 @@ def detect_course(filename, df):
     for kw, name in COURSE_KEYWORDS.items():
         if kw in fn:
             return name
-    # fallback: check column headers
     cols = " ".join(df.columns).lower()
     for kw, name in COURSE_KEYWORDS.items():
         if kw in cols:
@@ -168,8 +206,8 @@ def process_files(uploaded_files):
         ssn_col = None
         for i, c in enumerate(cols):
             if 'last 4 digits' in c.lower() and 'social' in c.lower():
-                if i+1 < len(cols):
-                    ssn_col = cols[i+1]
+                if i + 1 < len(cols):
+                    ssn_col = cols[i + 1]
                 break
 
         for _, row in df.iterrows():
@@ -177,8 +215,8 @@ def process_files(uploaded_files):
             email = str(row.get('Email', '')).strip()
             if not email or email == 'nan':
                 continue
-            key    = email.lower()
-            result = str(row.get('Course result', '')).strip()
+            key      = email.lower()
+            result   = str(row.get('Course result', '')).strip()
             finished = str(row.get('Finished', '')).strip()
             started  = str(row.get('Started',  '')).strip()
 
@@ -201,126 +239,144 @@ def process_files(uploaded_files):
             if ssn and not people[key]['ssn4']:
                 people[key]['ssn4'] = ssn
             people[key]['courses'].append({
-                'course':           course_name,
-                'status':           result,
-                'completion_date':  clean_date(finished),
-                'started_date':     clean_date(started),
+                'course':          course_name,
+                'status':          result,
+                'completion_date': clean_date(finished),
+                'started_date':    clean_date(started),
             })
 
     return sorted(people.values(), key=lambda x: x['name'].lower()), course_names_seen
 
 # ── PDF builder ───────────────────────────────────────────────────────────────
-NAVY      = colors.HexColor('#1B3A6B')
-GOLD      = colors.HexColor('#C9A84C')
-GREEN_DK  = colors.HexColor('#2E7D32')
-GREEN_LT  = colors.HexColor('#E8F5E9')
-ORANGE_DK = colors.HexColor('#E65100')
-ORANGE_LT = colors.HexColor('#FFF3E0')
-GRAY_LT   = colors.HexColor('#F5F5F5')
-GRAY_BD   = colors.HexColor('#DDDDDD')
-WHITE     = colors.white
-TEXT      = colors.HexColor('#2C2C2C')
+def build_person_pdf(person, use_color=True) -> bytes:
+    if use_color:
+        NAVY      = colors.HexColor('#1B3A6B')
+        GOLD      = colors.HexColor('#C9A84C')
+        GREEN_DK  = colors.HexColor('#2E7D32')
+        GREEN_LT  = colors.HexColor('#E8F5E9')
+        ORANGE_DK = colors.HexColor('#E65100')
+        ORANGE_LT = colors.HexColor('#FFF3E0')
+    else:
+        NAVY      = colors.black
+        GOLD      = colors.HexColor('#888888')
+        GREEN_DK  = colors.black
+        GREEN_LT  = colors.HexColor('#F5F5F5')
+        ORANGE_DK = colors.black
+        ORANGE_LT = colors.HexColor('#F5F5F5')
 
-def build_person_pdf(person) -> bytes:
+    GRAY_LT = colors.HexColor('#F5F5F5')
+    GRAY_BD = colors.HexColor('#DDDDDD')
+    WHITE   = colors.white
+    TEXT    = colors.HexColor('#2C2C2C')
+
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=letter,
         leftMargin=0.65*inch, rightMargin=0.65*inch,
-        topMargin=0.5*inch, bottomMargin=0.6*inch)
+        topMargin=0.5*inch,   bottomMargin=0.65*inch)
 
     S = lambda n, **kw: ParagraphStyle(n, **kw)
-    title_s  = S('t',  fontName='Helvetica-Bold',    fontSize=20, textColor=WHITE,     alignment=TA_CENTER)
-    sub_s    = S('s',  fontName='Helvetica-Oblique', fontSize=10, textColor=GOLD,      alignment=TA_CENTER)
-    label_s  = S('l',  fontName='Helvetica-Bold',    fontSize=9,  textColor=NAVY)
-    value_s  = S('v',  fontName='Helvetica',         fontSize=10, textColor=TEXT)
-    sec_s    = S('se', fontName='Helvetica-Bold',    fontSize=10, textColor=WHITE,     alignment=TA_LEFT)
-    col_s    = S('c',  fontName='Helvetica-Bold',    fontSize=8.5,textColor=WHITE,     alignment=TA_CENTER)
-    cell_s   = S('ce', fontName='Helvetica',         fontSize=9.5,textColor=TEXT)
-    cell_c_s = S('cc', fontName='Helvetica',         fontSize=9.5,textColor=TEXT,      alignment=TA_CENTER)
-    green_s  = S('g',  fontName='Helvetica-Bold',    fontSize=9.5,textColor=GREEN_DK,  alignment=TA_CENTER)
-    orange_s = S('o',  fontName='Helvetica-Bold',    fontSize=9.5,textColor=ORANGE_DK, alignment=TA_CENTER)
-    footer_s = S('f',  fontName='Helvetica-Oblique', fontSize=7.5,
-                       textColor=colors.HexColor('#888888'), alignment=TA_CENTER)
+    title_s       = S('t',  fontName='Helvetica-Bold',    fontSize=20, textColor=WHITE,    alignment=TA_CENTER)
+    sub_s         = S('s',  fontName='Helvetica-Oblique', fontSize=10, textColor=GOLD,     alignment=TA_CENTER)
+    label_s       = S('l',  fontName='Helvetica-Bold',    fontSize=9,  textColor=NAVY)
+    value_s       = S('v',  fontName='Helvetica',         fontSize=10, textColor=TEXT)
+    sec_s         = S('se', fontName='Helvetica-Bold',    fontSize=10, textColor=WHITE,    alignment=TA_LEFT)
+    course_s      = S('c',  fontName='Helvetica-Bold',    fontSize=10, textColor=TEXT)
+    status_pass_s = S('sp', fontName='Helvetica-Bold',    fontSize=9,  textColor=GREEN_DK)
+    status_prog_s = S('so', fontName='Helvetica-Bold',    fontSize=9,  textColor=ORANGE_DK)
+    date_s        = S('d',  fontName='Helvetica',         fontSize=9,  textColor=colors.HexColor('#666666'))
 
     story = []
 
-    # Banner
-    ht = Table([[Paragraph("TRAINING TRANSCRIPT", title_s)],
-                [Paragraph("Construction Workforce Safety Training", sub_s)]],
-               colWidths=[7.2*inch])
-    ht.setStyle(TableStyle([
-        ('BACKGROUND',    (0,0),(-1,-1), NAVY),
-        ('TOPPADDING',    (0,0),(0,0), 14), ('BOTTOMPADDING',(0,0),(0,0), 2),
-        ('TOPPADDING',    (0,1),(0,1), 2),  ('BOTTOMPADDING',(0,1),(0,1), 12),
+    # Header banner
+    header_table = Table(
+        [[Paragraph("TRAINING TRANSCRIPT", title_s)],
+         [Paragraph("Construction Workforce Safety Training", sub_s)]],
+        colWidths=[7.2*inch]
+    )
+    header_table.setStyle(TableStyle([
+        ('BACKGROUND',    (0,0), (-1,-1), NAVY),
+        ('TOPPADDING',    (0,0), (-1,-1), 18),
+        ('BOTTOMPADDING', (0,-1), (-1,-1), 18),
+        ('LEFTPADDING',   (0,0), (-1,-1), 20),
+        ('RIGHTPADDING',  (0,0), (-1,-1), 20),
     ]))
-    story.append(ht)
-    story.append(Spacer(1, 10))
+    story.append(header_table)
+    story.append(Spacer(1, 16))
 
-    # Info box
-    info = Table([
-        [Paragraph("NAME",       label_s), Paragraph(person['name'],               value_s)],
-        [Paragraph("EMAIL",      label_s), Paragraph(person['email'],              value_s)],
-        [Paragraph("LAST 4 SS#", label_s), Paragraph(person['ssn4'] or '—',       value_s)],
-    ], colWidths=[1.0*inch, 6.2*inch])
-    info.setStyle(TableStyle([
-        ('BACKGROUND',    (0,0),(-1,-1), GRAY_LT),
-        ('BOX',           (0,0),(-1,-1), 1, GRAY_BD),
-        ('INNERGRID',     (0,0),(-1,-1), 0.5, GRAY_BD),
-        ('TOPPADDING',    (0,0),(-1,-1), 7), ('BOTTOMPADDING',(0,0),(-1,-1), 7),
-        ('LEFTPADDING',   (0,0),(-1,-1), 10), ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+    # Worker info block
+    name_display = person['name'] or person['email']
+    ssn_display  = f"SSN (Last 4): ••••{person['ssn4']}" if person.get('ssn4') else "SSN (Last 4): —"
+    info_data = [
+        [Paragraph("EMPLOYEE", label_s), Paragraph("EMAIL", label_s), Paragraph("IDENTIFIER", label_s)],
+        [Paragraph(name_display, value_s), Paragraph(person['email'], value_s), Paragraph(ssn_display, value_s)],
+    ]
+    info_table = Table(info_data, colWidths=[2.4*inch, 2.8*inch, 2.0*inch])
+    info_table.setStyle(TableStyle([
+        ('BACKGROUND',    (0,0), (-1,0), GRAY_LT),
+        ('BACKGROUND',    (0,1), (-1,1), WHITE),
+        ('BOX',           (0,0), (-1,-1), 0.5, GRAY_BD),
+        ('INNERGRID',     (0,0), (-1,-1), 0.5, GRAY_BD),
+        ('TOPPADDING',    (0,0), (-1,-1), 8),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+        ('LEFTPADDING',   (0,0), (-1,-1), 10),
+        ('RIGHTPADDING',  (0,0), (-1,-1), 10),
     ]))
-    story.append(info)
-    story.append(Spacer(1, 14))
+    story.append(info_table)
+    story.append(Spacer(1, 18))
 
-    passed = [c for c in person['courses'] if c['status'].lower() == 'passed']
-    inprog = [c for c in person['courses'] if c['status'].lower() == 'in progress']
+    # Section header
+    sec_table = Table([[Paragraph("COURSE COMPLETIONS", sec_s)]], colWidths=[7.2*inch])
+    sec_table.setStyle(TableStyle([
+        ('BACKGROUND',    (0,0), (-1,-1), NAVY),
+        ('TOPPADDING',    (0,0), (-1,-1), 8),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+        ('LEFTPADDING',   (0,0), (-1,-1), 12),
+    ]))
+    story.append(sec_table)
+    story.append(Spacer(1, 6))
 
-    def course_table(rows_data, hdr_color, row_bg):
-        rows = [[Paragraph("Course Name", col_s),
-                 Paragraph("Status", col_s),
-                 Paragraph("Date", col_s)]] + rows_data
-        t = Table(rows, colWidths=[4.0*inch, 1.4*inch, 1.8*inch])
-        style = [
-            ('BACKGROUND',    (0,0),(-1,0), hdr_color),
-            ('TOPPADDING',    (0,0),(-1,-1), 7), ('BOTTOMPADDING',(0,0),(-1,-1), 7),
-            ('LEFTPADDING',   (0,0),(-1,-1), 8), ('RIGHTPADDING', (0,0),(-1,-1), 8),
-            ('GRID',          (0,0),(-1,-1), 0.5, GRAY_BD),
-            ('VALIGN',        (0,0),(-1,-1), 'MIDDLE'),
-        ]
-        for i in range(1, len(rows)):
-            style.append(('BACKGROUND',(0,i),(-1,i), row_bg if (i-1)%2==0 else WHITE))
-        t.setStyle(TableStyle(style))
-        return t
+    # Course rows
+    for i, c in enumerate(person['courses']):
+        bg           = GRAY_LT if i % 2 == 0 else WHITE
+        status_s     = status_pass_s if 'pass' in c['status'].lower() else status_prog_s
+        status_label = c['status'] if c['status'] else '—'
+        comp_date    = c['completion_date'] or '—'
+        start_date   = c['started_date'] or '—'
 
-    if passed:
-        h = Table([[Paragraph("  COMPLETED COURSES", sec_s)]], colWidths=[7.2*inch])
-        h.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),GREEN_DK),
-                                ('TOPPADDING',(0,0),(-1,-1),7),('BOTTOMPADDING',(0,0),(-1,-1),7)]))
-        story.append(h)
-        rows = [[Paragraph(c['course'], cell_s),
-                 Paragraph("Passed", green_s),
-                 Paragraph(c['completion_date'] or '—', cell_c_s)] for c in passed]
-        story.append(course_table(rows, colors.HexColor('#4CAF50'), GREEN_LT))
-        story.append(Spacer(1, 14))
-
-    if inprog:
-        h = Table([[Paragraph("  COURSES IN PROGRESS", sec_s)]], colWidths=[7.2*inch])
-        h.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,-1),ORANGE_DK),
-                                ('TOPPADDING',(0,0),(-1,-1),7),('BOTTOMPADDING',(0,0),(-1,-1),7)]))
-        story.append(h)
-        rows = [[Paragraph(c['course'], cell_s),
-                 Paragraph("In Progress", orange_s),
-                 Paragraph(c['started_date'] or '—', cell_c_s)] for c in inprog]
-        story.append(course_table(rows, colors.HexColor('#FF7043'), ORANGE_LT))
+        row_data = [[
+            Paragraph(c['course'], course_s),
+            Paragraph(status_label, status_s),
+            Paragraph(f"Started: {start_date}", date_s),
+            Paragraph(f"Completed: {comp_date}", date_s),
+        ]]
+        row_table = Table(row_data, colWidths=[2.9*inch, 1.1*inch, 1.5*inch, 1.7*inch])
+        row_table.setStyle(TableStyle([
+            ('BACKGROUND',    (0,0), (-1,-1), bg),
+            ('TOPPADDING',    (0,0), (-1,-1), 10),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 10),
+            ('LEFTPADDING',   (0,0), (-1,-1), 10),
+            ('RIGHTPADDING',  (0,0), (-1,-1), 6),
+            ('BOX',           (0,0), (-1,-1), 0.3, GRAY_BD),
+        ]))
+        story.append(row_table)
+        story.append(Spacer(1, 2))
 
     story.append(Spacer(1, 20))
-    story.append(HRFlowable(width='100%', thickness=0.5, color=GRAY_BD))
-    story.append(Spacer(1, 4))
-    story.append(Paragraph("Construction Workforce Safety Training  |  Confidential Training Record", footer_s))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=GOLD))
+    story.append(Spacer(1, 6))
+    footer_s = S('f', fontName='Helvetica-Oblique', fontSize=8,
+                 textColor=colors.HexColor('#999999'), alignment=TA_CENTER)
+    story.append(Paragraph(
+        "Generated by Training Transcript Generator · Construction Workforce Safety Training",
+        footer_s
+    ))
 
     doc.build(story)
-    return buf.getvalue()
+    buf.seek(0)
+    return buf.read()
 
-def merge_pdfs(pdf_bytes_list) -> bytes:
+# ── PDF merger ────────────────────────────────────────────────────────────────
+def merge_pdfs(pdf_bytes_list: list) -> bytes:
     writer = PdfWriter()
     for pdf_bytes in pdf_bytes_list:
         reader = PdfReader(io.BytesIO(pdf_bytes))
@@ -328,74 +384,70 @@ def merge_pdfs(pdf_bytes_list) -> bytes:
             writer.add_page(page)
     out = io.BytesIO()
     writer.write(out)
-    return out.getvalue()
+    out.seek(0)
+    return out.read()
 
-# ── Upload section ────────────────────────────────────────────────────────────
-st.markdown('<div class="section-label">Upload CSV Files</div>', unsafe_allow_html=True)
+# ── Parse batch emails helper ─────────────────────────────────────────────────
+def parse_email_list(raw_text: str) -> list:
+    """Extract and normalize a list of emails from raw text (newline or comma separated)."""
+    raw    = raw_text.replace(',', '\n')
+    emails = [e.strip().lower() for e in raw.splitlines() if e.strip()]
+    valid  = [e for e in emails if re.match(r'^[\w\.\+\-]+@[\w\-]+\.[a-z]{2,}$', e)]
+    return list(dict.fromkeys(valid))  # deduplicate, preserve order
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ── Main UI ───────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+
+st.markdown('<div class="section-label">Upload Training Data</div>', unsafe_allow_html=True)
+st.markdown('<div class="upload-hint">Drop one or more CSV exports below — each file is treated as a separate course</div>', unsafe_allow_html=True)
 
 uploaded_files = st.file_uploader(
-    "Drop your CSV exports here",
+    "Upload CSV files",
     type=["csv"],
     accept_multiple_files=True,
     label_visibility="collapsed"
 )
 
-if not uploaded_files:
-    st.markdown("""
-    <div class="upload-hint">
-        ⬆️ Drag and drop one or more training CSV files above<br>
-        <small>Supports: Asbestos, COVID-19, Lead Awareness, Hazard Communication — or any new course CSV</small>
-    </div>
-    """, unsafe_allow_html=True)
-
-# ── Process ───────────────────────────────────────────────────────────────────
 if uploaded_files:
-    with st.spinner("Reading files..."):
-        people, courses_found = process_files(uploaded_files)
+    people, courses    = process_files(uploaded_files)
+    people_by_email    = {p['email'].lower(): p for p in people}
+    total  = len(people)
+    passed = sum(1 for p in people if any('pass' in c['status'].lower() for c in p['courses']))
 
-    total     = len(people)
-    passed_ct = sum(1 for p in people if any(c['status'].lower()=='passed'    for c in p['courses']))
-    inprog_ct = sum(1 for p in people if any(c['status'].lower()=='in progress' for c in p['courses']))
-
-    # Stats
     st.markdown(f"""
     <div class="stat-row">
-        <div class="stat-box"><div class="stat-num">{total}</div><div class="stat-label">Workers Found</div></div>
-        <div class="stat-box"><div class="stat-num">{len(courses_found)}</div><div class="stat-label">Courses</div></div>
-        <div class="stat-box"><div class="stat-num">{passed_ct}</div><div class="stat-label">Have Completions</div></div>
-        <div class="stat-box"><div class="stat-num">{inprog_ct}</div><div class="stat-label">In Progress</div></div>
+        <div class="stat-box"><div class="stat-num">{total}</div><div class="stat-label">Workers</div></div>
+        <div class="stat-box"><div class="stat-num">{len(courses)}</div><div class="stat-label">Courses</div></div>
+        <div class="stat-box"><div class="stat-num">{passed}</div><div class="stat-label">Passed</div></div>
     </div>
     """, unsafe_allow_html=True)
 
-    # Courses detected
-    st.markdown('<div class="section-label">Courses Detected</div>', unsafe_allow_html=True)
-    for c in courses_found:
-        st.markdown(f"<div style='font-size:0.85rem;color:#555;padding:2px 0'>✅ {c}</div>", unsafe_allow_html=True)
-
-    # Worker preview
-    st.markdown('<div class="section-label">Workers Preview</div>', unsafe_allow_html=True)
-    with st.expander(f"View all {total} workers", expanded=False):
+    with st.expander("👥 Preview all workers"):
         for p in people:
-            passed_n = sum(1 for c in p['courses'] if c['status'].lower()=='passed')
-            inprog_n = sum(1 for c in p['courses'] if c['status'].lower()=='in progress')
+            statuses  = [c['status'] for c in p['courses']]
+            badge_cls = 'badge-pass' if any('pass' in s.lower() for s in statuses) else 'badge-prog'
+            badge_txt = 'PASS' if any('pass' in s.lower() for s in statuses) else 'IN PROGRESS'
             st.markdown(f"""
             <div class="worker-card">
-                <span><b>{p['name']}</b> &nbsp;·&nbsp; <span style="color:#999;font-size:0.82rem">{p['email']}</span></span>
-                <span>
-                    <span class="badge-pass">{passed_n} passed</span>
-                    {'&nbsp;·&nbsp;<span class="badge-prog">' + str(inprog_n) + ' in progress</span>' if inprog_n else ''}
-                </span>
+                <span>{p['name']} <span style="color:#999;font-size:0.8em">· {p['email']}</span></span>
+                <span class="{badge_cls}">{badge_txt}</span>
             </div>
             """, unsafe_allow_html=True)
 
-    st.markdown('<div class="section-label">Generate Transcripts</div>', unsafe_allow_html=True)
+    # ── PDF Options ───────────────────────────────────────────────────────────
+    st.markdown('<div class="section-label">PDF Options</div>', unsafe_allow_html=True)
+    color_choice = st.checkbox("🖨️ Color PDFs (leave unchecked for grayscale)", value=True)
 
-    col1, col2 = st.columns(2)
+    # ── Generate All ──────────────────────────────────────────────────────────
+    st.markdown('<div class="section-label">Generate Transcripts / Export Data</div>', unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns([1, 1, 1])
 
     with col1:
         if st.button("📄 Generate All Transcripts PDF", use_container_width=True, type="primary"):
             with st.spinner(f"Building {total} transcripts..."):
-                all_pdfs = [build_person_pdf(p) for p in people]
+                all_pdfs = [build_person_pdf(p, use_color=color_choice) for p in people]
                 merged   = merge_pdfs(all_pdfs)
             st.download_button(
                 label="⬇️ Download All_Transcripts.pdf",
@@ -411,21 +463,148 @@ if uploaded_files:
                 zip_buf = io.BytesIO()
                 with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
                     for p in people:
-                        pdf_bytes = build_person_pdf(p)
+                        pdf_bytes = build_person_pdf(p, use_color=color_choice)
                         safe_name = re.sub(r'[^\w\-]', '_', p['name'])
                         zf.writestr(f"{safe_name}.pdf", pdf_bytes)
                 zip_buf.seek(0)
             st.download_button(
-                label="⬇️ Download Individual_PDFs.zip",
-                data=zip_buf.getvalue(),
-                file_name="Individual_Transcripts.zip",
+                label="⬇️ Download Transcripts.zip",
+                data=zip_buf,
+                file_name="Transcripts.zip",
                 mime="application/zip",
                 use_container_width=True
             )
 
-# ── Footer ────────────────────────────────────────────────────────────────────
-st.markdown("""
-<div style="text-align:center;margin-top:48px;font-size:0.75rem;color:#bbb;">
-    Construction Workforce Safety Training · Private Use Only
-</div>
-""", unsafe_allow_html=True)
+    with col3:
+        if st.button("✏️ Export Combined CSV", use_container_width=True):
+            csv_buf = io.StringIO()
+            csv_buf.write('Name,Email,SSN4,Course,Status,CompletionDate,StartedDate\n')
+            for p in people:
+                for c in p['courses']:
+                    csv_buf.write(
+                        f"{p['name']},{p['email']},{p.get('ssn4','')},{c['course']},"
+                        f"{c['status']},{c.get('completion_date','')},{c.get('started_date','')}\n"
+                    )
+            st.download_button(
+                label="⬇️ Download combined.csv",
+                data=csv_buf.getvalue(),
+                file_name="combined.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # ── Batch Email Lookup ────────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════════
+    st.markdown("---")
+    st.markdown('<div class="section-label">Batch Email Lookup</div>', unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="batch-box">
+        <div class="batch-header">🔍 Generate Transcripts for Specific Emails</div>
+        <div class="batch-sub">Enter emails manually or upload a .txt / .csv file — only matched workers will get transcripts.</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    batch_tab1, batch_tab2 = st.tabs(["✏️ Paste Emails", "📁 Upload File"])
+
+    batch_emails = []
+
+    with batch_tab1:
+        raw_input = st.text_area(
+            "Enter emails (one per line, or comma-separated):",
+            height=160,
+            placeholder="jane.doe@example.com\njohn.smith@example.com\n...",
+            label_visibility="collapsed"
+        )
+        if raw_input.strip():
+            batch_emails = parse_email_list(raw_input)
+            if batch_emails:
+                st.caption(f"Parsed **{len(batch_emails)}** valid email(s).")
+
+    with batch_tab2:
+        email_file = st.file_uploader(
+            "Upload a .txt or .csv file containing emails",
+            type=["txt", "csv"],
+            key="batch_email_file"
+        )
+        if email_file:
+            raw_file_text = email_file.read().decode("utf-8", errors="ignore")
+            batch_emails  = parse_email_list(raw_file_text)
+            st.caption(f"Parsed **{len(batch_emails)}** valid email(s) from uploaded file.")
+
+    if batch_emails:
+        matched   = [people_by_email[e] for e in batch_emails if e in people_by_email]
+        unmatched = [e for e in batch_emails if e not in people_by_email]
+
+        # Results summary chips
+        chips_html = ""
+        for p in matched:
+            chips_html += f'<span class="match-chip">✓ {p["email"]}</span>'
+        for e in unmatched:
+            chips_html += f'<span class="nomatch-chip">✗ {e}</span>'
+
+        st.markdown(f"""
+        <div style="margin: 8px 0 14px;">
+            <strong style="font-size:0.85rem; color:#1B3A6B;">
+                {len(matched)} matched &nbsp;·&nbsp; {len(unmatched)} not found
+            </strong><br/><br/>
+            {chips_html}
+        </div>
+        """, unsafe_allow_html=True)
+
+        if unmatched:
+            with st.expander(f"⚠️ {len(unmatched)} email(s) not found in uploaded CSVs"):
+                for e in unmatched:
+                    st.markdown(f"- `{e}`")
+
+        if matched:
+            st.markdown('<div class="section-label">Download Batch Results</div>', unsafe_allow_html=True)
+            bcol1, bcol2 = st.columns(2)
+
+            with bcol1:
+                if st.button(
+                    f"📄 Generate PDF for {len(matched)} matched worker(s)",
+                    use_container_width=True,
+                    type="primary"
+                ):
+                    with st.spinner(f"Building {len(matched)} transcript(s)..."):
+                        batch_pdfs   = [build_person_pdf(p, use_color=color_choice) for p in matched]
+                        batch_merged = merge_pdfs(batch_pdfs)
+                    st.download_button(
+                        label="⬇️ Download Batch_Transcripts.pdf",
+                        data=batch_merged,
+                        file_name="Batch_Transcripts.pdf",
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
+
+            with bcol2:
+                if st.button(
+                    f"🗂 Download ZIP ({len(matched)} individual PDFs)",
+                    use_container_width=True
+                ):
+                    with st.spinner("Packaging individual PDFs..."):
+                        zip_buf = io.BytesIO()
+                        with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+                            for p in matched:
+                                pdf_bytes = build_person_pdf(p, use_color=color_choice)
+                                safe_name = re.sub(r'[^\w\-]', '_', p['name'])
+                                zf.writestr(f"{safe_name}.pdf", pdf_bytes)
+                        zip_buf.seek(0)
+                    st.download_button(
+                        label="⬇️ Download Batch_Transcripts.zip",
+                        data=zip_buf,
+                        file_name="Batch_Transcripts.zip",
+                        mime="application/zip",
+                        use_container_width=True
+                    )
+        else:
+            st.warning("None of the entered emails matched any workers in the uploaded CSVs.")
+
+else:
+    st.markdown("""
+    <div class="upload-hint" style="margin-top: 32px;">
+        ⬆️ Upload at least one CSV file above to get started
+    </div>
+    """, unsafe_allow_html=True)

@@ -639,7 +639,7 @@ elif page == "LIUNA Certificates":
     if liuna_file:
         raw_text = liuna_file.read().decode("utf-8-sig", errors="ignore")
         try:
-            groups = load_csv_from_text(raw_text)
+            groups = load_csv_from_text(raw_text, filename=liuna_file.name)
         except Exception as exc:
             st.error(f"Failed to parse CSV: {exc}")
             st.stop()

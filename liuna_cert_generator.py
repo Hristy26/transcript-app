@@ -344,39 +344,104 @@ import io
 import zipfile
 
 
-def load_csv_from_text(raw_text: str) -> dict:
+def _class_name_from_filename(filename: str) -> str:
+    """
+    Derive a human-readable class name from an EasyGenerator filename.
+    e.g. 'Silica-Awareness_2026-04-29T14_18_39_588Z_ea00e496.csv'
+         -> 'Silica Awareness'
+    Strips the timestamp/UUID suffix after the first underscore+date pattern.
+    """
+    stem = filename.rsplit(".", 1)[0]           # drop .csv
+    stem = re.sub(r"_\d{4}-\d{2}-\d{2}.*$", "", stem)  # drop _YYYY-MM-DD...
+    stem = stem.replace("-", " ").replace("_", " ")
+    return stem.strip().title()
+
+
+def _is_easygenerator_csv(header_row: list) -> bool:
+    """Return True if the CSV looks like an EasyGenerator export."""
+    joined = " ".join(header_row).lower()
+    return "course result" in joined or "course score" in joined
+
+
+def load_csv_from_text(raw_text: str, filename: str = "") -> dict:
     """
     Parse CSV from a raw string (already read from an uploaded file).
-    Groups rows by Member ID.
-    Returns dict: { member_id: { 'name': str, 'mid': str, 'certs': [...] } }
+
+    Supports two formats:
+      • LIUNA class-information CSV (no header, columns by position)
+      • EasyGenerator export (has header row: Name, Email, Course result, Finished …)
+
+    Groups rows by Member ID (LIUNA) or Email (EasyGenerator).
+    Returns dict: { key: { 'name': str, 'mid': str, 'certs': [...] } }
     """
     import csv as _csv
     groups = defaultdict(lambda: {"name": "", "mid": "", "certs": []})
+    lines  = raw_text.splitlines()
 
-    reader = _csv.reader(raw_text.splitlines())
-    for row in reader:
-        if not row:
-            continue
-        while len(row) <= max(COL_CLASS_NAME, COL_HOURS, COL_DATE_END,
-                               COL_MEMBER_ID, COL_LAST_NAME, COL_FIRST_NAME):
-            row.append("")
+    if not lines:
+        return {}
 
-        mid = row[COL_MEMBER_ID].strip()
-        if not mid:
-            continue
+    # Peek at first row to detect format
+    first_row = next(_csv.reader([lines[0]]))
 
-        name = get_name(row)
-        cls  = row[COL_CLASS_NAME].strip()
-        date = row[COL_DATE_END].strip()
+    if _is_easygenerator_csv(first_row):
+        # ── EasyGenerator format ─────────────────────────────────────────────
+        cls_name = _class_name_from_filename(filename) if filename else "Online Course"
+        reader   = _csv.reader(lines[1:])   # skip header
 
-        groups[mid]["name"] = name
-        groups[mid]["mid"]  = mid
-        groups[mid]["certs"].append({
-            "name": name,
-            "cls":  cls,
-            "date": date,
-            "mid":  mid,
-        })
+        for row in reader:
+            if not row:
+                continue
+            # pad row
+            while len(row) < 7:
+                row.append("")
+
+            full_name = row[0].strip()
+            result    = row[3].strip().lower()
+            date      = row[6].strip()
+
+            if not full_name or result != "passed":
+                continue
+
+            # Use email as unique key; fall back to name
+            email = row[1].strip() if len(row) > 1 else ""
+            key   = email or full_name
+
+            groups[key]["name"] = full_name.upper()
+            groups[key]["mid"]  = email
+            groups[key]["certs"].append({
+                "name": full_name.upper(),
+                "cls":  cls_name,
+                "date": date,
+                "mid":  email,
+            })
+
+    else:
+        # ── LIUNA class-information CSV (no header, columns by position) ─────
+        reader = _csv.reader(lines)
+        for row in reader:
+            if not row:
+                continue
+            while len(row) <= max(COL_CLASS_NAME, COL_HOURS, COL_DATE_END,
+                                   COL_MEMBER_ID, COL_LAST_NAME, COL_FIRST_NAME):
+                row.append("")
+
+            mid = row[COL_MEMBER_ID].strip()
+            if not mid:
+                continue
+
+            name = get_name(row)
+            cls  = row[COL_CLASS_NAME].strip()
+            date = row[COL_DATE_END].strip()
+
+            groups[mid]["name"] = name
+            groups[mid]["mid"]  = mid
+            groups[mid]["certs"].append({
+                "name": name,
+                "cls":  cls,
+                "date": date,
+                "mid":  mid,
+            })
 
     return dict(groups)
 

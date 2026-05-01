@@ -334,3 +334,125 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# ── Streamlit-compatible API ─────────────────────────────────────────────────
+# These functions are imported by app.py and work entirely in memory
+# (no file I/O) so they work cleanly inside Streamlit Cloud.
+
+import io
+import zipfile
+
+
+def load_csv_from_text(raw_text: str) -> dict:
+    """
+    Parse CSV from a raw string (already read from an uploaded file).
+    Groups rows by Member ID.
+    Returns dict: { member_id: { 'name': str, 'mid': str, 'certs': [...] } }
+    """
+    import csv as _csv
+    groups = defaultdict(lambda: {"name": "", "mid": "", "certs": []})
+
+    reader = _csv.reader(raw_text.splitlines())
+    for row in reader:
+        if not row:
+            continue
+        while len(row) <= max(COL_CLASS_NAME, COL_HOURS, COL_DATE_END,
+                               COL_MEMBER_ID, COL_LAST_NAME, COL_FIRST_NAME):
+            row.append("")
+
+        mid = row[COL_MEMBER_ID].strip()
+        if not mid:
+            continue
+
+        name = get_name(row)
+        cls  = row[COL_CLASS_NAME].strip()
+        date = row[COL_DATE_END].strip()
+
+        groups[mid]["name"] = name
+        groups[mid]["mid"]  = mid
+        groups[mid]["certs"].append({
+            "name": name,
+            "cls":  cls,
+            "date": date,
+            "mid":  mid,
+        })
+
+    return dict(groups)
+
+
+def _build_pdf_bytes(group: dict,
+                     org_name: str, org_addr: str, org_city: str, org_phone: str,
+                     dir_name: str, dir_title: str) -> bytes:
+    """Render all certs for one student into a PDF and return raw bytes."""
+    buf = io.BytesIO()
+    c = rl_canvas.Canvas(buf, pagesize=landscape(letter))
+    for j, cert in enumerate(group["certs"]):
+        if j > 0:
+            c.showPage()
+        draw_cert(
+            c,
+            name      = cert["name"],
+            cls       = cert["cls"],
+            date      = cert["date"],
+            member_id = cert["mid"],
+            dir_name  = dir_name,
+            dir_title = dir_title,
+            org_name  = org_name,
+            org_addr  = org_addr,
+            org_city  = org_city,
+            org_phone = org_phone,
+        )
+    c.save()
+    return buf.getvalue()
+
+
+def generate_pdfs_to_zip(groups: dict,
+                         org_name: str = "LIUNA Training of Michigan",
+                         org_addr: str = "11155 Beardslee Road",
+                         org_city: str = "Perry, MI 48872",
+                         org_phone: str = "(517) 625-4919",
+                         dir_name: str = "Jeff Smrz",
+                         dir_title: str = "Director") -> bytes:
+    """
+    Generate one PDF per student and return a ZIP archive as bytes.
+    Called by the Streamlit app's LIUNA Certificates page.
+    """
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for mid, group in groups.items():
+            pdf_bytes = _build_pdf_bytes(
+                group, org_name, org_addr, org_city, org_phone, dir_name, dir_title
+            )
+            fname = safe_filename(group["name"], mid)
+            zf.writestr(fname, pdf_bytes)
+    return zip_buf.getvalue()
+
+
+def generate_pdfs_merged(groups: dict,
+                         org_name: str = "LIUNA Training of Michigan",
+                         org_addr: str = "11155 Beardslee Road",
+                         org_city: str = "Perry, MI 48872",
+                         org_phone: str = "(517) 625-4919",
+                         dir_name: str = "Jeff Smrz",
+                         dir_title: str = "Director") -> bytes:
+    """
+    Generate all certificates merged into a single PDF and return as bytes.
+    Called by the Streamlit app's LIUNA Certificates page.
+    """
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    for mid, group in groups.items():
+        pdf_bytes = _build_pdf_bytes(
+            group, org_name, org_addr, org_city, org_phone, dir_name, dir_title
+        )
+        reader_buf = io.BytesIO(pdf_bytes)
+        from pypdf import PdfReader
+        reader = PdfReader(reader_buf)
+        for page in reader.pages:
+            writer.add_page(page)
+
+    out_buf = io.BytesIO()
+    writer.write(out_buf)
+    return out_buf.getvalue()

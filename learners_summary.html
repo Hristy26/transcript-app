@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Learners Summary Report — May 2026</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'IBM Plex Sans', sans-serif;
+    background: #f4f3ef;
+    color: #1a1a1a;
+    padding: 2rem;
+    min-height: 100vh;
+  }
+  .page { max-width: 820px; margin: 0 auto; }
+  .report-header {
+    border-bottom: 2px solid #1a1a1a;
+    padding-bottom: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  .label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: #666;
+  }
+  h1 {
+    font-size: 26px;
+    font-weight: 600;
+    margin: 4px 0 2px;
+  }
+  .meta { font-size: 13px; color: #555; }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+    margin-bottom: 2rem;
+  }
+  .stat {
+    background: #fff;
+    border: 0.5px solid #ddd;
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+  }
+  .stat-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+  .stat-val { font-size: 28px; font-weight: 600; font-family: 'IBM Plex Mono', monospace; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border: 0.5px solid #ddd; border-radius: 8px; overflow: hidden; }
+  thead th {
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: #888;
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 0.5px solid #e0e0e0;
+    background: #fafaf8;
+  }
+  tbody tr { border-bottom: 0.5px solid #f0f0f0; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: #fafaf8; }
+  td { padding: 11px 14px; font-size: 14px; vertical-align: middle; }
+  .course-name { font-weight: 400; color: #1a1a1a; width: 38%; }
+  .bar-cell { width: 42%; }
+  .bar-bg {
+    height: 7px;
+    background: #eeece8;
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .bar-fill {
+    height: 100%;
+    background: #1a6b4a;
+    border-radius: 999px;
+  }
+  .num {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    font-weight: 500;
+    color: #1a6b4a;
+    text-align: right;
+    width: 8%;
+  }
+  .pct {
+    font-size: 12px;
+    color: #888;
+    text-align: right;
+    width: 8%;
+  }
+  .footer {
+    margin-top: 1.5rem;
+    font-size: 12px;
+    color: #aaa;
+    font-family: 'IBM Plex Mono', monospace;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="report-header">
+    <div class="label">Trainscript — Learners Summary Report</div>
+    <h1>May 2026</h1>
+    <div class="meta">Source: learners-csv-report__27_.csv &nbsp;·&nbsp; Generated 2026-05-04 19:22</div>
+  </div>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-label">Total students</div>
+      <div class="stat-val">31</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">With completions</div>
+      <div class="stat-val">19</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">No completions</div>
+      <div class="stat-val">12</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Total completions</div>
+      <div class="stat-val">57</div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Course name</th>
+        <th>Completions</th>
+        <th style="text-align:right">Count</th>
+        <th style="text-align:right">% of class</th>
+      </tr>
+    </thead>
+    <tbody>
+            <tr>
+              <td class="course-name">Lead Awareness Worker</td>
+              <td class="bar-cell">
+                <div class="bar-bg">
+                  <div class="bar-fill" style="width:100%"></div>
+                </div>
+              </td>
+              <td class="num">14</td>
+              <td class="pct">45%</td>
+            </tr>
+            <tr>
+              <td class="course-name">Silica Awareness</td>
+              <td class="bar-cell">
+                <div class="bar-bg">
+                  <div class="bar-fill" style="width:64%"></div>
+                </div>
+              </td>
+              <td class="num">9</td>
+              <td class="pct">29%</td>
+            </tr>
+            <tr>
+              <td class="course-name">Respirator Awareness</td>
+              <td class="bar-cell">
+                <div class="bar-bg">
+                  <div class="bar-fill" style="width:57%"></div>
+                </div>
+              </td>
+              <td class="num">8</td>
+              <td class="pct">26%</td>
+            </tr>
+            <tr>
+              <td class="course-name">Asbestos Awareness</td>
+              <td class="bar-cell">
+                <div class="bar-bg">
+                  <div class="bar-fill" style="width:50%"></div>
+                </div>
+              </td>
+              <td class="num">7</td>
+              <td class="pct">23%</td>
+            </tr>
+            <tr>
+              <td class="course-name">Hazard Communication</td>
+              <td class="bar-cell">
+                <div class="bar-bg">
+                  <div class="bar-fill" style="width:50%"></div>
+                </div>
+              </td>
+              <td class="num">7</td>
+              <td class="pct">23%</td>
+            </tr>
+            <tr>
+              <td class="course-name">Bloodborne Pathogen Awareness</td>
+              <td class="bar-cell">
+                <div class="bar-bg">
+                  <div class="bar-fill" style="width:50%"></div>
+                </div>
+              </td>
+              <td class="num">7</td>
+              <td class="pct">23%</td>
+            </tr>
+            <tr>
+              <td class="course-name">COVID-19 for The Construction Workforce</td>
+              <td class="bar-cell">
+                <div class="bar-bg">
+                  <div class="bar-fill" style="width:29%"></div>
+                </div>
+              </td>
+              <td class="num">4</td>
+              <td class="pct">13%</td>
+            </tr>
+            <tr>
+              <td class="course-name">COVID-19 for The Construction Workforce (Do not use)</td>
+              <td class="bar-cell">
+                <div class="bar-bg">
+                  <div class="bar-fill" style="width:7%"></div>
+                </div>
+              </td>
+              <td class="num">1</td>
+              <td class="pct">3%</td>
+            </tr>
+    </tbody>
+  </table>
+
+  <div class="footer">* Completion date not stored per-course in this CSV format — based on learner last-active date.</div>
+</div>
+</body>
+</html>

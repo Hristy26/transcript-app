@@ -35,6 +35,22 @@ def _is_passed(value) -> bool:
     return isinstance(value, str) and value.strip().lower().startswith("passed")
 
 
+def _course_status(value) -> str | None:
+    """
+    Classify one student/course cell.
+
+    Returns "Passed", "In Progress", or None when the student was never
+    enrolled in that course at all (the LMS export fills those cells with
+    a placeholder like "N/A", "-", or leaves them blank).
+    """
+    if not isinstance(value, str):
+        return None
+    v = value.strip()
+    if not v or v.upper() in ("N/A", "-", "NAN"):
+        return None
+    return "Passed" if v.lower().startswith("passed") else "In Progress"
+
+
 # ── main class ────────────────────────────────────────────────────────────────
 
 class LearnersReport:
@@ -105,6 +121,29 @@ class LearnersReport:
         )
         self.total_courses_with_completions = len(self.course_summary)
 
+        # Per-student breakdown — one row per student, listing exactly which
+        # courses they've passed and which are still in progress (courses
+        # they were never enrolled in at all are left out, since a real
+        # class roster CSV has a column for every course the LMS has ever
+        # offered, not just the ones a given student took).
+        student_rows = []
+        for _, row in self.df.iterrows():
+            passed, in_progress = [], []
+            for col in self._course_cols:
+                status = _course_status(row[col])
+                if status == "Passed":
+                    passed.append(_clean_course_name(col))
+                elif status == "In Progress":
+                    in_progress.append(_clean_course_name(col))
+            student_rows.append({
+                "name":            str(row.get("Name", "")).strip(),
+                "email":           str(row.get("Email", "")).strip(),
+                "passed_count":    len(passed),
+                "passed":          passed,
+                "in_progress":     in_progress,
+            })
+        self.student_rows = student_rows
+
     # ── public API ────────────────────────────────────────────────────────────
 
     def summary_dict(self) -> dict:
@@ -117,6 +156,7 @@ class LearnersReport:
             "students_no_completions": self.students_no_completions,
             "total_courses_with_completions": self.total_courses_with_completions,
             "courses": self.course_summary,
+            "students": self.student_rows,
         }
 
     def print_summary(self):

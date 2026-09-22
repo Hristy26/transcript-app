@@ -761,6 +761,33 @@ elif page == "Learner Summary":
         else:
             st.info("No completed courses found in this file.")
 
+        st.markdown('<div class="section-label">Student Breakdown</div>', unsafe_allow_html=True)
+        student_search = st.text_input(
+            "Search students", placeholder="🔎  Search by name or email…",
+            label_visibility="collapsed", key="learner_summary_search",
+        )
+
+        student_records = report.student_rows
+        if student_search:
+            q = student_search.lower()
+            student_records = [
+                s for s in student_records
+                if q in s["name"].lower() or q in s["email"].lower()
+            ]
+
+        student_table = pd.DataFrame([
+            {
+                "Name":        s["name"],
+                "Email":       s["email"],
+                "Passed":      s["passed_count"],
+                "Passed Courses": ", ".join(s["passed"]) if s["passed"] else "—",
+                "In Progress": ", ".join(s["in_progress"]) if s["in_progress"] else "—",
+            }
+            for s in student_records
+        ])
+        st.dataframe(student_table, use_container_width=True, hide_index=True, height=340)
+        st.caption(f"{len(student_records)} of {report.total_students} student(s) shown")
+
         st.download_button(
             "⬇️ Download HTML Report",
             data=report.to_html_string(),
@@ -777,8 +804,9 @@ elif page == "Learner Summary":
                 Upload a full learner export from your LMS (not a per-course file — this expects
                 one row per student with a column per course, like the ones the CSV Format note
                 above describes). The report shows how many students completed at least one
-                course, how many haven't yet, and a ranked breakdown of completions per course
-                for the reporting month.
+                course, how many haven't yet, a ranked breakdown of completions per course for
+                the reporting month, and a searchable student-by-student table listing exactly
+                which courses each person has passed and which are still in progress.
             </p>
         </div>""", unsafe_allow_html=True)
 

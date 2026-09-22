@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Generated report output — regenerated on demand, shouldn't be committed
+output/
+learners_summary.html
+
+# OS junk
+.DS_Store
+Thumbs.db

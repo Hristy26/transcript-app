@@ -5,10 +5,14 @@ Trainscript App — Learners Summary Report
 Parses a learner CSV export and produces a monthly course-completion summary.
 
 Usage:
-    from reports.learners_summary import LearnersReport
+    from learners_summary import LearnersReport
     report = LearnersReport("path/to/learners.csv")
     report.print_summary()
     report.export_html("output/summary.html")
+
+Also used directly by the Streamlit app's "Learner Summary" page — there,
+csv_path can be an uploaded-file object (anything with a .read()) instead
+of a path, since Streamlit hands us the file in memory rather than on disk.
 """
 
 import re
@@ -39,15 +43,23 @@ class LearnersReport:
 
     Parameters
     ----------
-    csv_path : str | Path
-        Path to the LMS learner CSV export.
+    csv_path : str | Path | file-like
+        Path to the LMS learner CSV export, or an already-open file-like
+        object (e.g. a Streamlit UploadedFile) with a .read() method.
     """
 
     COURSE_START_COL = 5  # Columns 0-4 are metadata (Name, Email, etc.)
 
-    def __init__(self, csv_path: str | Path):
-        self.csv_path = Path(csv_path)
-        self.df = pd.read_csv(self.csv_path)
+    def __init__(self, csv_path):
+        if hasattr(csv_path, "read"):
+            # File-like object (e.g. Streamlit's UploadedFile) — pandas can
+            # read it directly; keep its original filename (if any) around
+            # for display purposes, since there's no real path on disk.
+            self.csv_path = Path(getattr(csv_path, "name", "uploaded.csv"))
+            self.df = pd.read_csv(csv_path)
+        else:
+            self.csv_path = Path(csv_path)
+            self.df = pd.read_csv(self.csv_path)
         self._course_cols = self.df.columns[self.COURSE_START_COL:]
         self._parse()
 
@@ -137,7 +149,21 @@ class LearnersReport:
         """
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(self._build_html(), encoding="utf-8")
+        print(f"[Trainscript] Report saved → {output_path.resolve()}")
+        return output_path
 
+    def to_html_string(self) -> str:
+        """
+        Return the standalone HTML report as a string, without writing
+        anything to disk. Used by the Streamlit app's download button,
+        where writing a file as a side effect of viewing a page isn't
+        appropriate.
+        """
+        return self._build_html()
+
+    def _build_html(self) -> str:
+        """Build the standalone HTML report and return it as a string."""
         max_count = max(self.course_summary.values()) if self.course_summary else 1
         rows_html = ""
         for course, count in self.course_summary.items():
@@ -301,6 +327,4 @@ class LearnersReport:
 </body>
 </html>"""
 
-        output_path.write_text(html, encoding="utf-8")
-        print(f"[Trainscript] Report saved → {output_path.resolve()}")
-        return output_path
+        return html

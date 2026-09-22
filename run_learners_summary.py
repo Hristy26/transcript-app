@@ -15,9 +15,10 @@ import sys
 import argparse
 from pathlib import Path
 
-# Allow running from the trainscript root
+# Allow running this script from any directory — learners_summary.py lives
+# right next to it in this repo (there's no separate reports/ package here).
 sys.path.insert(0, str(Path(__file__).parent))
-from reports.learners_summary import LearnersReport
+from learners_summary import LearnersReport
 
 
 def main():

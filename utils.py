@@ -286,12 +286,22 @@ def merge_pdfs(pdf_bytes_list: list[bytes]) -> bytes:
 # ── ZIP builder ───────────────────────────────────────────────────────────────
 
 def build_zip(people: list[dict], use_color: bool = True) -> bytes:
-    """Package one PDF per person into a ZIP archive, returned as bytes."""
+    """Package one PDF per person into a ZIP archive, returned as bytes.
+
+    Person names aren't guaranteed unique (two different people can share the
+    same name with different emails), so filenames are disambiguated with a
+    numeric suffix (_2, _3, ...) on any collision to avoid silently
+    overwriting one person's transcript with another's in the archive.
+    """
     buf = io.BytesIO()
+    used_names: dict[str, int] = {}
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for person in people:
             pdf_bytes = build_person_pdf(person, use_color=use_color)
-            safe_name = re.sub(r"[^\w\-]", "_", person["name"] or "transcript")
+            base_name = re.sub(r"[^\w\-]", "_", person["name"] or "transcript")
+            count = used_names.get(base_name, 0) + 1
+            used_names[base_name] = count
+            safe_name = base_name if count == 1 else f"{base_name}_{count}"
             zf.writestr(f"{safe_name}.pdf", pdf_bytes)
     buf.seek(0)
     return buf.read()

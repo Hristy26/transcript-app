@@ -796,6 +796,49 @@ elif page == "Learner Summary":
             use_container_width=True,
             type="primary",
         )
+
+        st.markdown('<div class="section-label">Generate Transcripts</div>', unsafe_allow_html=True)
+        st.caption(
+            "Built from this report — email and last-4 SSN aren't in this CSV format, so those "
+            "show as a dash, and Completion Date is left blank since this file only has one "
+            "overall \"Last active\" date per student, not one per class."
+        )
+        transcript_color = st.checkbox(
+            "🖨️ Color PDFs (uncheck for grayscale / print-friendly)",
+            value=st.session_state.use_color, key="learner_summary_color",
+        )
+        st.session_state.use_color = transcript_color
+
+        transcript_people = [p for p in report.to_transcript_people() if p["courses"]]
+        gcol1, gcol2 = st.columns(2)
+
+        with gcol1:
+            st.markdown("""<div class="info-card"><h4>📄 Merged PDF</h4>
+            <p>One transcript per student who's taken at least one class, sorted alphabetically.</p></div>""",
+                        unsafe_allow_html=True)
+            if st.button(f"Build Merged PDF ({len(transcript_people)} students)",
+                          use_container_width=True, type="primary", key="learner_summary_merged_btn"):
+                with st.spinner(f"Building {len(transcript_people)} transcripts…"):
+                    merged = merge_pdfs([build_person_pdf(p, use_color=transcript_color) for p in transcript_people])
+                st.download_button(
+                    "⬇️ Download All_Transcripts.pdf",
+                    data=merged, file_name="All_Transcripts.pdf",
+                    mime="application/pdf", use_container_width=True, key="learner_summary_merged_dl",
+                )
+
+        with gcol2:
+            st.markdown("""<div class="info-card"><h4>🗂 Individual ZIP</h4>
+            <p>One PDF per student, named by student, packaged into a ZIP.</p></div>""",
+                        unsafe_allow_html=True)
+            if st.button(f"Package Individual PDFs ({len(transcript_people)} students)",
+                          use_container_width=True, key="learner_summary_zip_btn"):
+                with st.spinner("Packaging…"):
+                    zip_bytes = build_zip(transcript_people, use_color=transcript_color)
+                st.download_button(
+                    "⬇️ Download Transcripts.zip",
+                    data=zip_bytes, file_name="Transcripts.zip",
+                    mime="application/zip", use_container_width=True, key="learner_summary_zip_dl",
+                )
     else:
         st.markdown("""
         <div class="info-card">

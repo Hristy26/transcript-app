@@ -159,6 +159,36 @@ class LearnersReport:
             "students": self.student_rows,
         }
 
+    def to_transcript_people(self) -> list[dict]:
+        """
+        Convert this report's per-student data into the same person-dict
+        shape used by utils.build_person_pdf() / build_zip() / merge_pdfs()
+        (the transcript builders on the Upload & Process / Generate PDFs
+        pages), so a full learner export can generate individual
+        transcripts too, not just the per-course CSVs those pages expect.
+
+        This CSV format has no per-course completion/started date and no
+        last-4-SSN column at all (only the per-course CSVs do), so those
+        fields are left blank here rather than guessed at — the transcript
+        renderer already shows a dash for anything blank.
+        """
+        people = []
+        for s in self.student_rows:
+            courses = [
+                {"course": c, "status": "Passed", "completion_date": None, "started_date": None}
+                for c in s["passed"]
+            ] + [
+                {"course": c, "status": "In Progress", "completion_date": None, "started_date": None}
+                for c in s["in_progress"]
+            ]
+            people.append({
+                "name": s["name"],
+                "email": s["email"],
+                "ssn4": None,
+                "courses": courses,
+            })
+        return people
+
     def print_summary(self):
         """Print a formatted summary to the console."""
         print(f"\n{'='*55}")

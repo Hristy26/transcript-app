@@ -16,6 +16,7 @@ LIUNA certificate drawing lives in liuna_cert_generator.py.
 """
 
 import io
+import hashlib
 import re
 
 import pandas as pd
@@ -195,12 +196,56 @@ for key, default in [
         st.session_state[key] = default
 
 
-def require_data() -> bool:
-    """Show a warning and return False when no transcript data has been loaded."""
-    if not st.session_state.people:
-        st.warning("⬆️ No data loaded yet — go to **Upload & Process** first.")
-        return False
-    return True
+def load_csvs(uploaded_files) -> None:
+    """Process uploaded CSVs into session state (only when the file set changes)."""
+    sig = tuple((f.name, f.size) for f in uploaded_files)
+    if st.session_state.get("loaded_sig") == sig:
+        return
+    with st.spinner("Processing files…"):
+        people, courses = process_files(uploaded_files)
+    st.session_state.people      = people
+    st.session_state.courses     = courses
+    st.session_state.loaded_sig  = sig
+    st.session_state.loaded_names = [f.name for f in uploaded_files]
+    # Keep the raw files too, so pages with their own parser (LIUNA
+    # Certificates) can reuse whatever was dropped on any page.
+    shared, seen = [], set()
+    for f in uploaded_files:
+        data = f.getvalue()
+        h = hashlib.md5(data).hexdigest()
+        if h not in seen:
+            seen.add(h)
+            shared.append((f.name, data))
+    st.session_state.loaded_files = shared
+
+
+def require_data(page_key: str) -> bool:
+    """
+    Every data page gets its own uploader so you never have to leave the page.
+    No data yet  → show the uploader front and centre.
+    Data loaded  → show what's loaded, with a collapsed uploader to swap files.
+    """
+    has_data = bool(st.session_state.people)
+    if has_data:
+        n_files = len(st.session_state.get("loaded_names", [])) or "?"
+        box = st.expander(
+            f"📤 {len(st.session_state.people)} workers loaded from {n_files} file(s) "
+            "— click to load different CSVs"
+        )
+    else:
+        box = st.container()
+        hint = box.empty()
+        hint.info("⬆️ No data loaded yet — drop your CSV export(s) here to get started.")
+
+    files = box.file_uploader(
+        "Upload CSV files", type=["csv"], accept_multiple_files=True,
+        key=f"page_upload_{page_key}", label_visibility="collapsed",
+    )
+    if files:
+        load_csvs(files)
+        if not has_data:
+            hint.success(f"✅ Loaded {len(st.session_state.people)} workers.")
+    return bool(st.session_state.people)
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -284,13 +329,17 @@ def render_worker_row(person: dict, use_color: bool, key_prefix: str = "") -> No
 
     col_card, col_btn = st.columns([7, 1])
     with col_card:
-        st.markdown(f"""
-        <div class="worker-row {row_cls}">
-            <span class="worker-name">{person['name']}</span>
-            <span class="worker-email">{person['email']}</span>
-            {ssn_part}
-            <span class="badge {badge_cls}">{badge_txt}</span>
-        </div>""", unsafe_allow_html=True)
+        # Built on one line: a blank line (e.g. no SSN) would make Markdown
+        # treat the indented badge HTML as a code block and show raw tags.
+        st.markdown(
+            f'<div class="worker-row {row_cls}">'
+            f'<span class="worker-name">{person["name"]}</span> '
+            f'<span class="worker-email">{person["email"]}</span> '
+            f'{ssn_part} '
+            f'<span class="badge {badge_cls}">{badge_txt}</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
     with col_btn:
         if st.button("👁", key=f"{key_prefix}prev_{person['email']}",
                      use_container_width=True, help=f"Preview {person['name']}"):
@@ -319,10 +368,9 @@ if page == "Upload & Process":
     )
 
     if uploaded_files:
-        with st.spinner("Processing files…"):
-            people, courses = process_files(uploaded_files)
-            st.session_state.people  = people
-            st.session_state.courses = courses
+        load_csvs(uploaded_files)
+        people  = st.session_state.people
+        courses = st.session_state.courses
 
         passed = sum(1 for p in people if any("pass" in c["status"].lower() for c in p["courses"]))
         st.markdown(f"""
@@ -370,7 +418,7 @@ elif page == "Preview Workers":
         <p>Green rows = passed · Orange rows = in progress · Click 👁 to preview transcript</p>
     </div>""", unsafe_allow_html=True)
 
-    if not require_data():
+    if not require_data("preview"):
         st.stop()
 
     people    = st.session_state.people
@@ -410,7 +458,7 @@ elif page == "Generate PDFs":
         <p>Download transcripts for all workers — merged or as individual files in a ZIP</p>
     </div>""", unsafe_allow_html=True)
 
-    if not require_data():
+    if not require_data("generate"):
         st.stop()
 
     people = st.session_state.people
@@ -463,7 +511,7 @@ elif page == "Batch Lookup":
         <p>Paste or upload a list of emails — only matched workers get transcripts</p>
     </div>""", unsafe_allow_html=True)
 
-    if not require_data():
+    if not require_data("batch"):
         st.stop()
 
     people          = st.session_state.people
@@ -561,7 +609,7 @@ elif page == "Export CSV":
         <p>A clean, fully-structured export — preview below before downloading</p>
     </div>""", unsafe_allow_html=True)
 
-    if not require_data():
+    if not require_data("export"):
         st.stop()
 
     people = st.session_state.people
@@ -648,14 +696,31 @@ elif page == "LIUNA Certificates":
         dir_name  = st.text_input("Director full name", value="")
         dir_title = st.text_input("Director title",     value="Director")
 
+    # Files dropped here win; otherwise reuse the CSVs already loaded on
+    # Upload & Process (or any other page) so you only upload once.
+    cert_sources, seen = [], set()
     if liuna_files:
-        per_file_groups = []
         for f in liuna_files:
-            raw_text = f.read().decode("utf-8-sig", errors="ignore")
+            data = f.getvalue()
+            h = hashlib.md5(data).hexdigest()
+            if h not in seen:                     # skip exact duplicate files
+                seen.add(h)
+                cert_sources.append((f.name, data))
+    elif st.session_state.get("loaded_files"):
+        cert_sources = st.session_state.loaded_files
+        st.info(
+            f"📎 Using the {len(cert_sources)} CSV file(s) you already loaded "
+            f"({', '.join(n for n, _ in cert_sources)}). Drop files above to use different ones."
+        )
+
+    if cert_sources:
+        per_file_groups = []
+        for fname, data in cert_sources:
+            raw_text = data.decode("utf-8-sig", errors="ignore")
             try:
-                per_file_groups.append(load_csv_from_text(raw_text, filename=f.name))
+                per_file_groups.append(load_csv_from_text(raw_text, filename=fname))
             except Exception as exc:
-                st.error(f"Failed to parse {f.name}: {exc}")
+                st.error(f"Failed to parse {fname}: {exc}")
                 st.stop()
 
         groups = merge_groups(*per_file_groups)

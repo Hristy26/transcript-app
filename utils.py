@@ -2,6 +2,7 @@
 utils.py — Shared utilities for Training Transcript Generator + LIUNA Certificate Generator
 """
 
+import hashlib
 import io
 import re
 import zipfile
@@ -75,8 +76,16 @@ def process_files(uploaded_files) -> tuple[list[dict], list[str]]:
     people: dict[str, dict] = {}
     course_names_seen: list[str] = []
 
+    seen_hashes: set[str] = set()
     for uf in uploaded_files:
-        df = pd.read_csv(uf, encoding="utf-8-sig")
+        # Skip exact duplicate files (same export downloaded/dropped twice) so
+        # nobody ends up with the same course listed several times.
+        raw_bytes = uf.read() if hasattr(uf, "read") else open(uf, "rb").read()
+        digest = hashlib.md5(raw_bytes).hexdigest()
+        if digest in seen_hashes:
+            continue
+        seen_hashes.add(digest)
+        df = pd.read_csv(io.BytesIO(raw_bytes), encoding="utf-8-sig")
         course_name = detect_course(uf.name, df)
         if course_name not in course_names_seen:
             course_names_seen.append(course_name)
@@ -115,12 +124,14 @@ def process_files(uploaded_files) -> tuple[list[dict], list[str]]:
             if ssn and not people[key]["ssn4"]:
                 people[key]["ssn4"] = ssn
 
-            people[key]["courses"].append({
+            entry = {
                 "course":          course_name,
                 "status":          result,
                 "completion_date": clean_date(finished),
                 "started_date":    clean_date(started),
-            })
+            }
+            if entry not in people[key]["courses"]:  # same row in two files
+                people[key]["courses"].append(entry)
 
     return (
         sorted(people.values(), key=lambda x: x["name"].lower()),

@@ -33,8 +33,11 @@ from utils import (
 )
 from liuna_cert_generator import (
     load_csv_from_text,
+    merge_groups,
     generate_pdfs_to_zip,
     generate_pdfs_merged,
+    generate_single_pdf,
+    safe_filename,
 )
 from learners_summary import LearnersReport
 
@@ -605,26 +608,28 @@ elif page == "LIUNA Certificates":
     st.markdown("""
     <div class="page-header">
         <h2>🏆 LIUNA Certificates</h2>
-        <p>Upload a LIUNA class-information CSV and generate landscape completion certificates</p>
+        <p>Upload one or more class CSVs and generate landscape completion certificates</p>
     </div>""", unsafe_allow_html=True)
 
     st.markdown("""
     <div class="info-card">
         <h4>CSV Format</h4>
         <p>
-            No header row. Columns are read by position:<br>
-            <b>Col 2</b> = Class name &nbsp;·&nbsp;
-            <b>Col 7</b> = Hours &nbsp;·&nbsp;
-            <b>Col 10</b> = Completion date &nbsp;·&nbsp;
-            <b>Col 11</b> = Member ID &nbsp;·&nbsp;
-            <b>Col 12</b> = Last name &nbsp;·&nbsp;
-            <b>Col 13</b> = First name
+            Drop in multiple files at once — one per class works well (e.g. an EasyGenerator
+            export per course). Each file's class name comes from its filename, and only
+            passed students are included, with their real completion date. A student who
+            appears in more than one file (matched by email) gets one certificate per class,
+            all under their name.<br><br>
+            Also supports the older LIUNA class-information CSV format (no header row,
+            columns read by position: Col 2 = Class name, Col 7 = Hours, Col 10 = Completion
+            date, Col 11 = Member ID, Col 12 = Last name, Col 13 = First name).
         </p>
     </div>""", unsafe_allow_html=True)
 
-    liuna_file = st.file_uploader(
-        "Upload LIUNA CSV", type=["csv"], key="liuna_csv",
+    liuna_files = st.file_uploader(
+        "Upload LIUNA CSV(s)", type=["csv"], key="liuna_csv",
         label_visibility="collapsed",
+        accept_multiple_files=True,
     )
 
     st.markdown('<div class="section-label">Organization Details</div>', unsafe_allow_html=True)
@@ -638,13 +643,17 @@ elif page == "LIUNA Certificates":
         dir_name  = st.text_input("Director full name", value="")
         dir_title = st.text_input("Director title",     value="Director")
 
-    if liuna_file:
-        raw_text = liuna_file.read().decode("utf-8-sig", errors="ignore")
-        try:
-            groups = load_csv_from_text(raw_text, filename=liuna_file.name)
-        except Exception as exc:
-            st.error(f"Failed to parse CSV: {exc}")
-            st.stop()
+    if liuna_files:
+        per_file_groups = []
+        for f in liuna_files:
+            raw_text = f.read().decode("utf-8-sig", errors="ignore")
+            try:
+                per_file_groups.append(load_csv_from_text(raw_text, filename=f.name))
+            except Exception as exc:
+                st.error(f"Failed to parse {f.name}: {exc}")
+                st.stop()
+
+        groups = merge_groups(*per_file_groups)
 
         total_students = len(groups)
         total_certs    = sum(len(g["certs"]) for g in groups.values())
@@ -658,9 +667,10 @@ elif page == "LIUNA Certificates":
         with st.expander("👥 Preview students"):
             for mid, group in groups.items():
                 cert_count = len(group["certs"])
+                classes = ", ".join(sorted({c["cls"] for c in group["certs"]}))
                 st.markdown(
                     f"**{group['name']}** &nbsp;<span style='color:#999;font-size:0.8em'>"
-                    f"· {mid} · {cert_count} cert{'s' if cert_count > 1 else ''}</span>",
+                    f"· {mid} · {cert_count} cert{'s' if cert_count > 1 else ''} · {classes}</span>",
                     unsafe_allow_html=True,
                 )
 
@@ -700,9 +710,39 @@ elif page == "LIUNA Certificates":
                     data=zip_bytes, file_name="LIUNA_Certificates.zip",
                     mime="application/zip", use_container_width=True,
                 )
+
+        st.markdown('<div class="section-label">Print One Certificate</div>', unsafe_allow_html=True)
+        st.markdown("""<div class="info-card"><h4>🔎 Single Lookup</h4>
+        <p>Pick one student and download just their certificate(s) — no batch or ZIP needed.</p></div>""",
+                    unsafe_allow_html=True)
+
+        lookup_keys = sorted(groups.keys(), key=lambda k: groups[k]["name"].lower())
+
+        def _lookup_label(k: str) -> str:
+            g = groups[k]
+            n = len(g["certs"])
+            return f"{g['name']}  ·  {g['mid']}  ·  {n} cert{'s' if n != 1 else ''}"
+
+        selected_key = st.selectbox(
+            "Student", options=lookup_keys, format_func=_lookup_label,
+            label_visibility="collapsed", key="liuna_single_lookup",
+        )
+
+        if selected_key:
+            selected_group = groups[selected_key]
+            single_fname = safe_filename(selected_group["name"], selected_group["mid"])
+            if st.button(f"Build Certificate — {selected_group['name']}",
+                          use_container_width=True, type="primary"):
+                with st.spinner("Generating certificate…"):
+                    single_bytes = generate_single_pdf(selected_group, **org_kwargs)
+                st.download_button(
+                    f"⬇️ Download {single_fname}",
+                    data=single_bytes, file_name=single_fname,
+                    mime="application/pdf", use_container_width=True,
+                )
     else:
         st.markdown("""
-        <div class="upload-hint">⬆️ Upload a LIUNA class-information CSV above to get started</div>
+        <div class="upload-hint">⬆️ Upload one or more class CSVs above to get started</div>
         """, unsafe_allow_html=True)
 
 

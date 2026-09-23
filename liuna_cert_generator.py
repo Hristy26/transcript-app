@@ -42,6 +42,7 @@ from pathlib import Path
 from reportlab.lib.pagesizes import landscape, letter
 from reportlab.lib import colors
 from reportlab.pdfgen import canvas as rl_canvas
+from reportlab.pdfbase import pdfmetrics
 
 
 # ── Column indices (0-based) ────────────────────────────────────────────────
@@ -98,7 +99,8 @@ def safe_filename(name: str, member_id: str) -> str:
 
 
 def online_hours(class_name: str) -> str:
-    return "4.00" if class_name.lower() in ONLINE_4HR_CLASSES else "2.00"
+    cls_lower = class_name.lower()
+    return "4.00" if any(key in cls_lower for key in ONLINE_4HR_CLASSES) else "2.00"
 
 
 def wrap_text(c, text: str, font: str, size: float, max_width: float) -> list:
@@ -171,90 +173,99 @@ def draw_cert(c: rl_canvas.Canvas,
     c.setLineWidth(0.75)
     c.rect(23, 23, W - 46, H - 46, fill=0, stroke=1)
 
-    # Org title — 32pt bold
-    c.setFillColor(BLACK)
-    c.setFont("Times-Bold", 32)
-    c.drawCentredString(cx, H - 60, (org_name or "LIUNA Training of Michigan").upper())
-
-    # Address block — 11pt
-    c.setFont("Helvetica", 11)
-    c.setFillColor(DARK_GRAY)
-    c.drawCentredString(cx, H - 80, (org_addr or "").upper())
-    c.drawCentredString(cx, H - 94, (org_city or "").upper())
-    c.drawCentredString(cx, H - 108, org_phone or "")
-
-    # DECLARES THAT — 13pt italic
-    c.setFont("Times-Italic", 13)
-    c.setFillColor(LIGHT_GRAY)
-    c.drawCentredString(cx, H - 150, "DECLARES THAT")
-
-    # Student name — 26pt bold
-    c.setFont("Times-Bold", 26)
-    c.setFillColor(BLACK)
-    c.drawCentredString(cx, H - 190, name or "STUDENT NAME")
-
-    # Date — 13pt
-    c.setFont("Helvetica", 13)
-    c.setFillColor(DARK_GRAY)
-    c.drawCentredString(cx, H - 220, f"ON {fmt_date(date)}")
-
-    # Hours — 13pt
+    # ── Whole certificate body — one balanced, vertically-centered block ───
+    # Everything from the org title down through the signature row is laid
+    # out as a single list of rows and centered as one unit inside the
+    # inner border, instead of a title pinned to a fixed offset from the
+    # top with a separately-positioned middle and bottom. That keeps the
+    # top and bottom margins even (so the title isn't crowded against the
+    # top border) and the whole thing moves together if it ever needs
+    # re-balancing again.
     hrs = online_hours(cls)
-    c.drawCentredString(cx, H - 244, f"COMPLETED {hrs} HOURS OF")
-
-    # Class name — 22pt bold
-    c.setFont("Times-Bold", 22)
-    c.setFillColor(BLACK)
-    c.drawCentredString(cx, H - 278, cls.upper())
-
-    # ONLINE TRAINING — 13pt
-    c.setFont("Helvetica", 13)
-    c.setFillColor(DARK_GRAY)
-    c.drawCentredString(cx, H - 306, "ONLINE TRAINING")
-
-    # Light rule
-    c.setStrokeColor(RULE_GRAY)
-    c.setLineWidth(0.75)
-    c.line(55, H - 323, W - 55, H - 323)
-
-    # Disclosure — 11pt italic, word-wrapped
     disclosure = (
         f"The {org_name or 'LIUNA Training of Michigan'} is not, and should not be construed as, "
         "a substitute for an employer's obligation under OSHA or EPA to provide employees with "
         "safety training specific to the nature of the employee's job and pertinent to the actual "
         "equipment and machinery with which the employee will be working while in the contractor's employment."
     )
-    disc_lines = wrap_text(c, disclosure, "Times-Italic", 11, W - 140)
-    c.setFont("Times-Italic", 11)
-    c.setFillColor(MID_GRAY)
-    disc_start = H - 350
-    for i, ln in enumerate(disc_lines):
-        c.drawCentredString(cx, disc_start - i * 15, ln)
+    disc_lines = wrap_text(c, disclosure, "Times-Italic", 11, W - 180)
 
-    # Director — bottom right, 16pt italic
-    c.setFont("Times-Italic", 16)
-    c.setFillColor(BLACK)
-    c.drawCentredString(W - 200, 110, dir_name or "Director")
+    RULE     = object()  # sentinel: draw a horizontal divider instead of text
+    SIGN_ROW = object()  # sentinel: draw the director-signature + logo row
 
-    c.setStrokeColor(BLACK)
-    c.setLineWidth(0.75)
-    c.line(W - 330, 90, W - 70, 90)
+    disc_rows = [(ln, "Times-Italic", 11, MID_GRAY, 15, 0) for ln in disc_lines]
+    if disc_rows:
+        last = disc_rows[-1]
+        disc_rows[-1] = (last[0], last[1], last[2], last[3], last[4], 34)
 
-    c.setFont("Helvetica", 11)
-    c.setFillColor(DARK_GRAY)
-    c.drawString(W - 330, 75, (dir_title or "DIRECTOR").upper())
+    # (text, font, size, color, leading, gap-after-this-row)
+    rows = [
+        ((org_name or "LIUNA Training of Michigan").upper(), "Times-Bold",   32, BLACK,      38, 18),
+        ((org_addr or "").upper(),                            "Helvetica",    11, DARK_GRAY,  14, 0),
+        ((org_city or "").upper(),                            "Helvetica",    11, DARK_GRAY,  14, 0),
+        (org_phone or "",                                     "Helvetica",    11, DARK_GRAY,  14, 30),
+        ("DECLARES THAT",                                     "Times-Italic", 13, LIGHT_GRAY, 16, 26),
+        (name or "STUDENT NAME",                              "Times-Bold",   26, BLACK,      30, 16),
+        (f"ON {fmt_date(date)}",                               "Helvetica",    13, DARK_GRAY,  16, 8),
+        (f"COMPLETED {hrs} HOURS OF",                          "Helvetica",    13, DARK_GRAY,  16, 16),
+        (cls.upper(),                                          "Times-Bold",   22, BLACK,      26, 16),
+        ("ONLINE TRAINING",                                    "Helvetica",    13, DARK_GRAY,  16, 24),
+        (RULE,                                                 None,           0,  None,       0, 20),
+        *disc_rows,
+        (SIGN_ROW,                                             None,           0,  None,       44, 0),
+    ]
 
-    # EasyGenerator logo — bottom left
-    c.setFillColor(colors.HexColor("#F26522"))
-    c.ellipse(60, 54, 100, 86, fill=1, stroke=0)
-    c.setFillColor(WHITE)
-    c.setFont("Helvetica-Bold", 9)
-    c.drawCentredString(80, 73, "easy")
-    c.setFont("Helvetica", 8)
-    c.drawCentredString(80, 62, "gen")
-    c.setFillColor(LIGHT_GRAY)
-    c.setFont("Helvetica", 10)
-    c.drawString(106, 66, "easygenerator")
+    total_height = sum(leading + gap for _, _, _, _, leading, gap in rows) - rows[-1][5]
+
+    # The title's ascender rises above its own baseline and isn't part of
+    # any row's counted height, so it has to be carved out of the top
+    # margin explicitly — otherwise centering the row heights alone still
+    # leaves the title looking crowded against the top border.
+    title_font, title_size = rows[0][1], rows[0][2]
+    title_ascent = pdfmetrics.getFont(title_font).face.ascent / 1000 * title_size
+
+    top_bound    = H - 23 - title_ascent   # inner border, minus the title's ascender
+    bottom_bound = 23                      # inner border
+    available    = top_bound - bottom_bound
+    y = bottom_bound + (available + total_height) / 2
+
+    for text, font, size, color, leading, gap in rows:
+        if text is RULE:
+            c.setStrokeColor(RULE_GRAY)
+            c.setLineWidth(0.75)
+            c.line(65, y - leading / 2, W - 65, y - leading / 2)
+        elif text is SIGN_ROW:
+            # Director signature resting on the line, EasyGenerator logo
+            # aligned to the same row on the left.
+            line_y = y - 6
+
+            c.setFont("Times-Italic", 16)
+            c.setFillColor(BLACK)
+            c.drawCentredString(W - 200, y, dir_name or "Director")
+
+            c.setStrokeColor(BLACK)
+            c.setLineWidth(0.75)
+            c.line(W - 330, line_y, W - 70, line_y)
+
+            c.setFont("Helvetica", 11)
+            c.setFillColor(DARK_GRAY)
+            c.drawString(W - 330, line_y - 15, (dir_title or "DIRECTOR").upper())
+
+            c.setFillColor(colors.HexColor("#F26522"))
+            c.ellipse(60, line_y - 36, 100, line_y - 4, fill=1, stroke=0)
+            c.setFillColor(WHITE)
+            c.setFont("Helvetica-Bold", 9)
+            c.drawCentredString(80, line_y - 17, "easy")
+            c.setFont("Helvetica", 8)
+            c.drawCentredString(80, line_y - 28, "gen")
+            c.setFillColor(LIGHT_GRAY)
+            c.setFont("Helvetica", 10)
+            c.drawString(106, line_y - 24, "easygenerator")
+        else:
+            c.setFont(font, size)
+            c.setFillColor(color)
+            c.drawCentredString(cx, y, text)
+        y -= leading + gap
 
 
 # ── PDF generation ───────────────────────────────────────────────────────────
@@ -386,26 +397,40 @@ def load_csv_from_text(raw_text: str, filename: str = "") -> dict:
 
     if _is_easygenerator_csv(first_row):
         # ── EasyGenerator format ─────────────────────────────────────────────
-        cls_name = _class_name_from_filename(filename) if filename else "Online Course"
-        reader   = _csv.reader(lines[1:])   # skip header
+        # Read by header name rather than fixed position — EasyGenerator
+        # exports have varied over time (e.g. extra "Groups"/"Platform"
+        # columns before "Course result"), so a positional read silently
+        # breaks whenever the column order shifts.
+        cls_name    = _class_name_from_filename(filename) if filename else "Online Course"
+        dict_reader = _csv.DictReader(lines)   # first item in `lines` is the header row
+        fieldnames  = dict_reader.fieldnames or []
+        lower_map   = {fn.strip().lower(): fn for fn in fieldnames}
 
-        for row in reader:
+        def _find_col(*candidates):
+            for cand in candidates:
+                if cand.lower() in lower_map:
+                    return lower_map[cand.lower()]
+            return None
+
+        name_col   = _find_col("Name")
+        email_col  = _find_col("Email")
+        result_col = _find_col("Course result", "Result")
+        finish_col = _find_col("Finished", "Completion Date", "Completed")
+
+        for row in dict_reader:
             if not row:
                 continue
-            # pad row
-            while len(row) < 7:
-                row.append("")
 
-            full_name = row[0].strip()
-            result    = row[3].strip().lower()
-            date      = row[6].strip()
+            full_name = (row.get(name_col) or "").strip() if name_col else ""
+            result    = (row.get(result_col) or "").strip().lower() if result_col else ""
+            date      = (row.get(finish_col) or "").strip() if finish_col else ""
 
             if not full_name or result != "passed":
                 continue
 
             # Use email as unique key; fall back to name
-            email = row[1].strip() if len(row) > 1 else ""
-            key   = email or full_name
+            email = (row.get(email_col) or "").strip() if email_col else ""
+            key   = email.lower() or full_name.lower()
 
             groups[key]["name"] = full_name.upper()
             groups[key]["mid"]  = email
@@ -446,6 +471,27 @@ def load_csv_from_text(raw_text: str, filename: str = "") -> dict:
     return dict(groups)
 
 
+def merge_groups(*group_dicts: dict) -> dict:
+    """
+    Merge several per-file `groups` dicts (each as returned by
+    `load_csv_from_text`) into one combined dict, so a student who shows up
+    in more than one uploaded CSV (e.g. one CSV per class) ends up as a
+    single entry with all of their certs together — one cert per class,
+    each keeping that class's own completion date.
+
+    Students are matched by the same key `load_csv_from_text` already uses
+    (lowercased email, or lowercased name / Member ID as a fallback), so
+    this only merges students across files that share that same key.
+    """
+    merged = defaultdict(lambda: {"name": "", "mid": "", "certs": []})
+    for gd in group_dicts:
+        for key, group in gd.items():
+            merged[key]["name"] = group["name"] or merged[key]["name"]
+            merged[key]["mid"]  = group["mid"]  or merged[key]["mid"]
+            merged[key]["certs"].extend(group["certs"])
+    return dict(merged)
+
+
 def _build_pdf_bytes(group: dict,
                      org_name: str, org_addr: str, org_city: str, org_phone: str,
                      dir_name: str, dir_title: str) -> bytes:
@@ -470,6 +516,25 @@ def _build_pdf_bytes(group: dict,
         )
     c.save()
     return buf.getvalue()
+
+
+def generate_single_pdf(group: dict,
+                        org_name: str = "LIUNA Training of Michigan",
+                        org_addr: str = "11155 Beardslee Road",
+                        org_city: str = "Perry, MI 48872",
+                        org_phone: str = "(517) 625-4919",
+                        dir_name: str = "Jeff Smrz",
+                        dir_title: str = "Director") -> bytes:
+    """
+    Generate one student's certificate(s) as a single PDF (one page per class
+    they completed) and return the raw bytes.
+
+    Used by the Streamlit app's LIUNA Certificates page for printing/downloading
+    just one student at a time, instead of the full merged PDF or ZIP.
+    """
+    return _build_pdf_bytes(
+        group, org_name, org_addr, org_city, org_phone, dir_name, dir_title
+    )
 
 
 def generate_pdfs_to_zip(groups: dict,

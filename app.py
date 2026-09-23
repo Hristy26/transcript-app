@@ -483,13 +483,18 @@ elif page == "Batch Lookup":
             batch_emails = parse_email_list(raw_input)
             if batch_emails:
                 st.caption(f"Parsed **{len(batch_emails)}** valid email(s).")
+            else:
+                st.warning("No email addresses found in the pasted text.")
 
     with tab2:
         email_file = st.file_uploader("Upload .txt or .csv", type=["txt", "csv"],
                                        key="batch_email_file")
         if email_file:
-            batch_emails = parse_email_list(email_file.read().decode("utf-8", errors="ignore"))
-            st.caption(f"Parsed **{len(batch_emails)}** valid email(s).")
+            batch_emails = parse_email_list(email_file.read().decode("utf-8-sig", errors="ignore"))
+            if batch_emails:
+                st.caption(f"Parsed **{len(batch_emails)}** valid email(s).")
+            else:
+                st.warning("No email addresses found in that file.")
 
     if batch_emails:
         matched   = [people_by_email[e] for e in batch_emails if e in people_by_email]

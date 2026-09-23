@@ -334,10 +334,11 @@ def build_clean_csv(people: list[dict]) -> str:
 
 def parse_email_list(raw_text: str) -> list[str]:
     """Extract and deduplicate valid e-mail addresses from free-form text."""
-    raw    = raw_text.replace(",", "\n")
-    emails = [e.strip().lower() for e in raw.splitlines() if e.strip()]
-    valid  = [e for e in emails if re.match(r"^[\w\.\+\-]+@[\w\-]+\.[a-z]{2,}$", e)]
-    return list(dict.fromkeys(valid))  # deduplicate, preserve order
+    # Pull every email-looking token out of the text, whatever separates them
+    # (newlines, commas, semicolons, tabs from Excel, spaces, quotes, <...>).
+    # Allows multi-part domains like name@state.mi.us or name@mail.example.com.
+    found = re.findall(r"[\w.+\-]+@[\w\-]+(?:\.[\w\-]+)*\.[A-Za-z]{2,}", raw_text)
+    return list(dict.fromkeys(e.lower() for e in found))  # dedupe, keep order
 
 
 # ── HTML transcript preview ───────────────────────────────────────────────────

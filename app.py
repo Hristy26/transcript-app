@@ -35,6 +35,7 @@ from utils import (
     parse_lookup_list,
     lookup_people,
     format_report_title,
+    format_span,
     report_filename,
     now_stamp,
     data_date_span,
@@ -163,7 +164,7 @@ html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
 .preview-wrap { font-family: 'DM Sans', Arial, sans-serif; border: 1px solid #ddd; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
 .preview-hdr  { background: #1B3A6B; padding: 22px 26px; text-align: center; }
 .preview-hdr h3 { color: #fff; font-size: 1.1rem; font-weight: 800; margin: 0 0 2px; letter-spacing: 2px; }
-.preview-hdr p  { color: #C9A84C; font-size: 0.78rem; margin: 0; }
+.preview-hdr p  { color: #C9A84C; font-size: 0.95rem; margin: 0; }
 .preview-meta { display: grid; grid-template-columns: 1.4fr 1.8fr 1fr; border-bottom: 1px solid #e0e0e0; }
 .preview-cell { padding: 11px 16px; border-right: 1px solid #e0e0e0; }
 .preview-cell:last-child { border-right: none; }
@@ -228,7 +229,7 @@ def load_csvs(uploaded_files) -> None:
     # Default report dates = earliest → latest date found in these CSVs
     start, end = data_date_span(people)
     if start:
-        st.session_state.span_default = (start, end)
+        st.session_state.report_range = (start, end)
     st.session_state._just_loaded = len(people)
     st.rerun()  # redraw the sidebar (report dates, loaded-data box) right away
 
@@ -325,16 +326,16 @@ def _month_span(d):
 with st.sidebar:
     from datetime import date as _date
     st.markdown('<div class="nav-section-label">Report Period</div>', unsafe_allow_html=True)
-    st.session_state.setdefault("report_name", "Learners Transcript CSV Report")
+    st.session_state.setdefault("report_name", "Learners Transcript Report")
     st.text_input("Report name", key="report_name")
-    _default = st.session_state.get("span_default") or _month_span(_date.today())
-    # No widget key on purpose: when new CSVs change the default, the picker
-    # resets to it; otherwise whatever you typed is kept.
-    _rng = st.date_input("Report dates (from – to)", value=_default, format="MM/DD/YYYY")
-    if isinstance(_rng, (tuple, list)) and len(_rng) == 2:
+    st.session_state.setdefault("report_range", _month_span(_date.today()))
+    # One stored range (report_range) drives every date picker. The pickers
+    # have no widget key on purpose, so they redraw whenever it changes
+    # (new CSVs loaded, or dates typed on another page).
+    _rng = st.date_input("Report dates (from – to)", value=st.session_state.report_range,
+                         format="MM/DD/YYYY")
+    if isinstance(_rng, (tuple, list)) and len(_rng) == 2 and tuple(_rng) != st.session_state.report_range:
         st.session_state.report_range = tuple(_rng)
-    elif "report_range" not in st.session_state:
-        st.session_state.report_range = tuple(_default)
     st.caption("Printed on transcripts and used as the file name:  \n**"
                + format_report_title(st.session_state.report_name, *st.session_state.report_range) + "**")
 
@@ -954,10 +955,26 @@ elif page == "Learner Summary":
             try:
                 from datetime import datetime as _dt
                 _m = _dt.strptime(report.report_month, "%B %Y").date()
-                st.session_state.span_default = _month_span(_m)
+                st.session_state.report_range = _month_span(_m)
                 st.rerun()
             except ValueError:
                 pass
+
+        # Report period — typed in by hand; starts at the export's month
+        st.markdown('<div class="section-label">📅 Report Period</div>', unsafe_allow_html=True)
+        _pr = st.date_input(
+            "Report period for this learner report (from – to)",
+            value=st.session_state.report_range, format="MM/DD/YYYY",
+            help="Used on this page, the HTML report, and the transcripts below. "
+                 "Also shown in the sidebar under Report Period.",
+        )
+        if isinstance(_pr, (tuple, list)) and len(_pr) == 2 and tuple(_pr) != st.session_state.report_range:
+            st.session_state.report_range = tuple(_pr)
+            st.rerun()  # keep the sidebar picker in step
+        _span = format_span(*st.session_state.report_range)
+        if _span:
+            report.report_month = _span   # heading + HTML report use the typed span
+        st.caption(f"Transcripts will be titled: **{report_title()}**")
 
         st.markdown(f"""
         <div class="stat-row">
@@ -1016,7 +1033,7 @@ elif page == "Learner Summary":
         st.download_button(
             "⬇️ Download HTML Report",
             data=report.to_html_string(),
-            file_name=f"learners_summary_{report.report_month.replace(' ', '_')}.html",
+            file_name=f"Learners_Summary_{report_filename(report.report_month)}.html",
             mime="text/html",
             use_container_width=True,
             type="primary",

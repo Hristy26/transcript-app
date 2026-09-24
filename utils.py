@@ -170,7 +170,7 @@ def build_person_pdf(person: dict, use_color: bool = True,
     Render a single training-transcript PDF and return raw bytes.
 
     report_title — replaces the header subtitle, e.g.
-                   "Learners Transcript CSV Report from July 1 to July 31, 2026"
+                   "Learners Transcript Report from July 1 to July 31, 2026"
     printed_at   — optional date/time stamped bottom-right on every page
     """
 
@@ -200,7 +200,7 @@ def build_person_pdf(person: dict, use_color: bool = True,
         return ParagraphStyle(name, **kw)
 
     title_s       = S("t",  fontName="Helvetica-Bold",    fontSize=20, textColor=WHITE,                      alignment=TA_CENTER)
-    sub_s         = S("s",  fontName="Helvetica-Oblique", fontSize=10, textColor=GOLD,                       alignment=TA_CENTER)
+    sub_s         = S("s",  fontName="Helvetica-Oblique", fontSize=12, textColor=GOLD,                       alignment=TA_CENTER)
     label_s       = S("l",  fontName="Helvetica-Bold",    fontSize=8,  textColor=NAVY)
     value_s       = S("v",  fontName="Helvetica",         fontSize=9,  textColor=TEXT)
     sec_s         = S("se", fontName="Helvetica-Bold",    fontSize=10, textColor=WHITE,                      alignment=TA_LEFT)
@@ -320,16 +320,20 @@ def build_person_pdf(person: dict, use_color: bool = True,
 
 # ── Report title / timestamp helpers ──────────────────────────────────────────
 
-def format_report_title(name: str, start, end) -> str:
-    """'Learners Transcript CSV Report from July 1 to July 31, 2026'."""
-    name = (name or "").strip() or "Learners Transcript CSV Report"
+def format_span(start, end) -> str:
+    """'July 1 to July 31, 2026' (years shown on both ends if they differ)."""
     if start is None or end is None:
-        return name
+        return ""
     if start.year == end.year:
-        span = f"{start:%B} {start.day} to {end:%B} {end.day}, {end.year}"
-    else:
-        span = f"{start:%B} {start.day}, {start.year} to {end:%B} {end.day}, {end.year}"
-    return f"{name} from {span}"
+        return f"{start:%B} {start.day} to {end:%B} {end.day}, {end.year}"
+    return f"{start:%B} {start.day}, {start.year} to {end:%B} {end.day}, {end.year}"
+
+
+def format_report_title(name: str, start, end) -> str:
+    """'Learners Transcript Report from July 1 to July 31, 2026'."""
+    name = (name or "").strip() or "Learners Transcript Report"
+    span = format_span(start, end)
+    return f"{name} from {span}" if span else name
 
 
 def report_filename(title: str) -> str:

@@ -251,7 +251,11 @@ class LearnersReport:
               <td class="pct">{pct}%</td>
             </tr>"""
 
-        generated = datetime.now().strftime("%Y-%m-%d %H:%M")
+        try:  # Michigan time, even when the server clock is UTC
+            from utils import now_stamp
+            generated = now_stamp()
+        except Exception:
+            generated = datetime.now().strftime("%m/%d/%Y %I:%M %p")
         html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>

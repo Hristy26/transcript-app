@@ -215,6 +215,7 @@ for key, default in [
     ("courses",   []),
     ("use_color", True),
     ("email_platform", "Outlook (desktop app)"),
+    ("reset_n", 0),
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -273,7 +274,7 @@ def require_data(page_key: str) -> bool:
 
     files = box.file_uploader(
         "Upload CSV files", type=["csv"], accept_multiple_files=True,
-        key=f"page_upload_{page_key}", label_visibility="collapsed",
+        key=f"page_upload_{page_key}_{st.session_state.reset_n}", label_visibility="collapsed",
     )
     if files:
         load_csvs(files)
@@ -283,14 +284,30 @@ def require_data(page_key: str) -> bool:
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
+def start_over() -> None:
+    """Clear everything loaded (CSVs, lookups, emails) but keep Settings and the current page."""
+    keep = {k: st.session_state[k] for k in ("use_color", "email_platform", "nav_radio")
+            if k in st.session_state}
+    n = st.session_state.get("reset_n", 0) + 1
+    st.session_state.clear()
+    st.session_state.update(keep)
+    st.session_state.reset_n = n   # new uploader keys → every upload box comes back empty
+    st.session_state._did_reset = True
+
+
 with st.sidebar:
     st.markdown("""
     <div class="sidebar-logo">
         <h1>📋 Transcript Generator</h1>
         <p>Construction Workforce Safety</p>
     </div>
-    <div class="nav-section-label">Navigation</div>
     """, unsafe_allow_html=True)
+    with st.popover("🔄 Start over", use_container_width=True):
+        st.markdown("Clears all loaded CSVs, lookups, and prepared emails so you can begin again. "
+                    "Your Settings are kept.")
+        st.button("Yes, clear everything", type="primary", on_click=start_over,
+                  use_container_width=True)
+    st.markdown('<div class="nav-section-label">Navigation</div>', unsafe_allow_html=True)
 
     page = st.radio(
         "nav",
@@ -331,6 +348,9 @@ with st.sidebar:
         </div>
         """, unsafe_allow_html=True)
 
+
+if st.session_state.pop("_did_reset", False):
+    st.toast("🔄 Cleared — ready to start over.")
 
 # ── Report period (sidebar) ───────────────────────────────────────────────────
 def _month_span(d):
@@ -467,6 +487,7 @@ if page == "Upload & Process":
     uploaded_files = st.file_uploader(
         "Upload CSV files", type=["csv"],
         accept_multiple_files=True, label_visibility="collapsed",
+        key=f"main_upload_{st.session_state.reset_n}",
     )
 
     if uploaded_files:
@@ -639,7 +660,7 @@ elif page == "Batch Lookup":
 
     with tab2:
         list_file = st.file_uploader("Upload .txt or .csv", type=["txt", "csv"],
-                                      key="batch_email_file")
+                                      key=f"batch_email_file_{st.session_state.reset_n}")
         if list_file:
             batch_entries = parse_lookup_list(list_file.getvalue().decode("utf-8-sig", errors="ignore"))
             if batch_entries:
@@ -799,7 +820,7 @@ elif page == "LIUNA Certificates":
     </div>""", unsafe_allow_html=True)
 
     liuna_files = st.file_uploader(
-        "Upload LIUNA CSV(s)", type=["csv"], key="liuna_csv",
+        "Upload LIUNA CSV(s)", type=["csv"], key=f"liuna_csv_{st.session_state.reset_n}",
         label_visibility="collapsed",
         accept_multiple_files=True,
     )
@@ -1029,7 +1050,7 @@ elif page == "Learner Summary":
     )
 
     summary_file = st.file_uploader(
-        "Upload learner CSV", type=["csv"], key="learner_summary_csv",
+        "Upload learner CSV", type=["csv"], key=f"learner_summary_csv_{st.session_state.reset_n}",
         label_visibility="collapsed",
     )
 

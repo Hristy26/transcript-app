@@ -85,7 +85,8 @@ def process_files(uploaded_files) -> tuple[list[dict], list[str]]:
         if digest in seen_hashes:
             continue
         seen_hashes.add(digest)
-        df = pd.read_csv(io.BytesIO(raw_bytes), encoding="utf-8-sig")
+        # dtype=str keeps leading zeros (last-4 "0900" must not become 900)
+        df = pd.read_csv(io.BytesIO(raw_bytes), encoding="utf-8-sig", dtype=str)
         course_name = detect_course(uf.name, df)
         if course_name not in course_names_seen:
             course_names_seen.append(course_name)
@@ -98,6 +99,16 @@ def process_files(uploaded_files) -> tuple[list[dict], list[str]]:
             if "last 4 digits" in c.lower() and "social" in c.lower():
                 if i + 1 < len(cols):
                     ssn_col = cols[i + 1]
+                break
+
+        # Full name the learner typed on registration — the column after
+        # "First and Last Name". The LMS "Name" column is sometimes just a
+        # first name ("Lamar"), so this gives Batch Lookup a second name to match.
+        regname_col: str | None = None
+        for i, c in enumerate(cols):
+            if "first and last name" in c.lower():
+                if i + 1 < len(cols):
+                    regname_col = cols[i + 1]
                 break
 
         for _, row in df.iterrows():
@@ -114,15 +125,26 @@ def process_files(uploaded_files) -> tuple[list[dict], list[str]]:
             ssn: str | None = None
             if ssn_col:
                 raw_ssn = str(row.get(ssn_col, "")).strip()
+                if raw_ssn.endswith(".0"):
+                    raw_ssn = raw_ssn[:-2]
                 if raw_ssn and raw_ssn not in ("-", "nan"):
-                    ssn = raw_ssn
+                    ssn = raw_ssn.zfill(4) if raw_ssn.isdigit() else raw_ssn
+
+            reg_name = ""
+            if regname_col:
+                reg_name = " ".join(str(row.get(regname_col, "")).split())
+                if reg_name in ("-", "nan"):
+                    reg_name = ""
 
             if key not in people:
-                people[key] = {"name": name, "email": email, "ssn4": None, "courses": []}
+                people[key] = {"name": name, "email": email, "ssn4": None,
+                               "alt_names": [], "courses": []}
             if name and name != "-":
                 people[key]["name"] = name
             if ssn and not people[key]["ssn4"]:
                 people[key]["ssn4"] = ssn
+            if reg_name and reg_name.lower() not in [n.lower() for n in people[key]["alt_names"]]:
+                people[key]["alt_names"].append(reg_name)
 
             entry = {
                 "course":          course_name,
@@ -350,6 +372,72 @@ def parse_email_list(raw_text: str) -> list[str]:
     # Allows multi-part domains like name@state.mi.us or name@mail.example.com.
     found = re.findall(r"[\w.+\-]+@[\w\-]+(?:\.[\w\-]+)*\.[A-Za-z]{2,}", raw_text)
     return list(dict.fromkeys(e.lower() for e in found))  # dedupe, keep order
+
+
+# ── Batch lookup (email, name, or last 4) ─────────────────────────────────────
+
+_EMAIL_RE = r"[\w.+\-]+@[\w\-]+(?:\.[\w\-]+)*\.[A-Za-z]{2,}"
+_HEADER_WORDS = {"name", "names", "email", "emails", "e-mail", "ssn", "last 4",
+                 "last4", "last 4 ssn", "ssn last 4", "first name", "last name"}
+
+
+def _norm_name(s: str) -> str:
+    return " ".join(re.sub(r"[^\w\s]", " ", s.lower()).split())
+
+
+def parse_lookup_list(raw_text: str) -> list[str]:
+    """
+    Split pasted/uploaded text into lookup entries. One entry per line, and
+    lines are also split on commas, semicolons and tabs (so Excel pastes and
+    CSV rows work). Any email on a line counts as its own entry.
+    """
+    entries: list[str] = []
+    for line in raw_text.splitlines():
+        emails = re.findall(_EMAIL_RE, line)
+        entries.extend(e.lower() for e in emails)
+        rest = re.sub(_EMAIL_RE, " ", line)
+        for part in re.split(r"[,;\t]", rest):
+            part = " ".join(part.replace("<", " ").replace(">", " ")
+                                .replace('"', " ").split())
+            if part.lower() in _HEADER_WORDS:
+                continue
+            if part.isdigit() or len(_norm_name(part)) > 1:  # skip junk like "-"
+                entries.append(part)
+    return list(dict.fromkeys(e for e in entries if e))  # dedupe, keep order
+
+
+def lookup_people(entries: list[str], people: list[dict]) -> list[tuple[str, str, list[dict]]]:
+    """
+    Match each entry against the loaded workers.
+    Returns (entry, kind, matches) where kind is "email", "last 4" or "name".
+      email  → exact email match
+      last 4 → a 3–4 digit number, matched against last-4 SSN (leading zero
+               optional, since Excel often drops it)
+      name   → every word typed appears in the worker's name or the full name
+               they entered at registration ("kevin clark", "clark", "lamar cassels")
+    """
+    results = []
+    for entry in entries:
+        if "@" in entry:
+            kind = "email"
+            hits = [p for p in people if p["email"].lower() == entry.lower()]
+        elif entry.isdigit() and 3 <= len(entry) <= 4:
+            kind = "last 4"
+            want = entry.zfill(4)
+            hits = [p for p in people if (p.get("ssn4") or "").zfill(4) == want]
+        else:
+            kind = "name"
+            words = _norm_name(entry).split()
+            hits = []
+            if not words:
+                results.append((entry, kind, hits))
+                continue
+            for p in people:
+                names = [p.get("name") or ""] + p.get("alt_names", [])
+                if any(all(w in _norm_name(n).split() for w in words) for n in names):
+                    hits.append(p)
+        results.append((entry, kind, hits))
+    return results
 
 
 # ── HTML transcript preview ───────────────────────────────────────────────────

@@ -15,12 +15,14 @@ All shared processing / PDF-building logic lives in utils.py.
 LIUNA certificate drawing lives in liuna_cert_generator.py.
 """
 
+import base64
 import io
 import hashlib
 import re
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from utils import (
     COURSE_KEYWORDS,
@@ -30,6 +32,8 @@ from utils import (
     build_zip,
     merge_pdfs,
     parse_email_list,
+    parse_lookup_list,
+    lookup_people,
     process_files,
 )
 from liuna_cert_generator import (
@@ -301,18 +305,49 @@ with st.sidebar:
 # ── Preview modal ─────────────────────────────────────────────────────────────
 @st.dialog("Transcript Preview", width="large")
 def show_preview_modal(person: dict, use_color: bool) -> None:
-    st.markdown(build_preview_html(person), unsafe_allow_html=True)
+    # Flatten to one line: indented/blank lines inside the HTML make Markdown
+    # show part of the preview as raw code instead of rendering it.
+    preview_html = " ".join(line.strip() for line in build_preview_html(person).splitlines())
+    st.markdown(preview_html, unsafe_allow_html=True)
     st.markdown("")
     pdf_bytes = build_person_pdf(person, use_color=use_color)
     safe_name = re.sub(r"[^\w\-]", "_", person["name"] or "transcript")
-    st.download_button(
-        "⬇️ Download this transcript as PDF",
-        data=pdf_bytes,
-        file_name=f"{safe_name}.pdf",
-        mime="application/pdf",
-        use_container_width=True,
-        type="primary",
-    )
+    dcol, pcol = st.columns(2)
+    with dcol:
+        st.download_button(
+            "⬇️ Download this transcript as PDF",
+            data=pdf_bytes,
+            file_name=f"{safe_name}.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+            type="primary",
+        )
+    with pcol:
+        print_pdf_button(pdf_bytes, "🖨️ Print this transcript")
+
+
+def print_pdf_button(pdf_bytes: bytes, label: str = "🖨️ Print") -> None:
+    """
+    A button that opens the PDF in a new browser tab, ready to print
+    (the browser's PDF viewer has a print icon, or press Ctrl+P).
+    Nothing is saved anywhere — the PDF lives only in this browser tab.
+    """
+    b64 = base64.b64encode(pdf_bytes).decode()
+    components.html(f"""
+    <button id="p" style="width:100%;height:38px;border:1px solid #1B3A6B;border-radius:8px;
+            background:#fff;color:#1B3A6B;font:600 14px sans-serif;cursor:pointer;">{label}</button>
+    <div id="m" style="font:12px sans-serif;color:#b00;margin-top:4px;"></div>
+    <script>
+    document.getElementById("p").onclick = function () {{
+        const bin = atob("{b64}");
+        const buf = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+        const url = URL.createObjectURL(new Blob([buf], {{type: "application/pdf"}}));
+        const w = window.open(url, "_blank");
+        if (!w) document.getElementById("m").innerText =
+            "Your browser blocked the new tab — allow pop-ups for this site, or use Download.";
+    }};
+    </script>""", height=62)
 
 
 # ── Worker row renderer ───────────────────────────────────────────────────────
@@ -508,49 +543,55 @@ elif page == "Batch Lookup":
     st.markdown("""
     <div class="page-header">
         <h2>🔍 Batch Lookup</h2>
-        <p>Paste or upload a list of emails — only matched workers get transcripts</p>
+        <p>Paste or upload emails, names, or last 4 of SSN — only matched workers get transcripts</p>
     </div>""", unsafe_allow_html=True)
 
     if not require_data("batch"):
         st.stop()
 
-    people          = st.session_state.people
-    people_by_email = {p["email"].lower(): p for p in people}
-    use_color       = st.session_state.use_color
+    people    = st.session_state.people
+    use_color = st.session_state.use_color
 
-    tab1, tab2   = st.tabs(["✏️ Paste Emails", "📁 Upload File"])
-    batch_emails = []
+    tab1, tab2    = st.tabs(["✏️ Paste List", "📁 Upload File"])
+    batch_entries = []
 
     with tab1:
         raw_input = st.text_area(
-            "Emails", height=160,
-            placeholder="jane.doe@example.com\njohn.smith@example.com\n…",
+            "Lookup list", height=160,
+            placeholder="One per line — mix and match:\njane.doe@example.com\nKevin Clark\n0900",
             label_visibility="collapsed",
         )
         if raw_input.strip():
-            batch_emails = parse_email_list(raw_input)
-            if batch_emails:
-                st.caption(f"Parsed **{len(batch_emails)}** valid email(s).")
+            batch_entries = parse_lookup_list(raw_input)
+            if batch_entries:
+                st.caption(f"Looking up **{len(batch_entries)}** entr{'y' if len(batch_entries) == 1 else 'ies'}.")
             else:
-                st.warning("No email addresses found in the pasted text.")
+                st.warning("Nothing to look up in the pasted text.")
 
     with tab2:
-        email_file = st.file_uploader("Upload .txt or .csv", type=["txt", "csv"],
-                                       key="batch_email_file")
-        if email_file:
-            batch_emails = parse_email_list(email_file.read().decode("utf-8-sig", errors="ignore"))
-            if batch_emails:
-                st.caption(f"Parsed **{len(batch_emails)}** valid email(s).")
+        list_file = st.file_uploader("Upload .txt or .csv", type=["txt", "csv"],
+                                      key="batch_email_file")
+        if list_file:
+            batch_entries = parse_lookup_list(list_file.getvalue().decode("utf-8-sig", errors="ignore"))
+            if batch_entries:
+                st.caption(f"Looking up **{len(batch_entries)}** entr{'y' if len(batch_entries) == 1 else 'ies'}.")
             else:
-                st.warning("No email addresses found in that file.")
+                st.warning("Nothing to look up in that file.")
 
-    if batch_emails:
-        matched   = [people_by_email[e] for e in batch_emails if e in people_by_email]
-        unmatched = [e for e in batch_emails if e not in people_by_email]
+    if batch_entries:
+        results   = lookup_people(batch_entries, people)
+        matched, seen = [], set()
+        for _, _, hits in results:
+            for p in hits:
+                if p["email"].lower() not in seen:
+                    seen.add(p["email"].lower())
+                    matched.append(p)
+        unmatched = [(e, k) for e, k, hits in results if not hits]
+        multi     = [(e, k, hits) for e, k, hits in results if len(hits) > 1]
 
         chips = (
-            "".join(f'<span class="match-chip">✓ {p["email"]}</span>' for p in matched) +
-            "".join(f'<span class="nomatch-chip">✗ {e}</span>'         for e in unmatched)
+            "".join(f'<span class="match-chip">✓ {p["name"] or p["email"]}</span>' for p in matched) +
+            "".join(f'<span class="nomatch-chip">✗ {e}</span>' for e, _ in unmatched)
         )
         st.markdown(f"""
         <div style="margin:8px 0 14px;">
@@ -559,27 +600,36 @@ elif page == "Batch Lookup":
             </strong><br><br>{chips}
         </div>""", unsafe_allow_html=True)
 
+        if multi:
+            with st.expander(f"⚠️ {len(multi)} entr{'y' if len(multi) == 1 else 'ies'} matched more than one worker — check these", expanded=True):
+                for e, k, hits in multi:
+                    who = "; ".join(f"{p['name']} ({p['email']})" for p in hits)
+                    st.markdown(f"- **{e}** ({k}) → {who}")
+                st.caption("All of them are included below. Use an email to pick just one.")
+
         if unmatched:
-            with st.expander(f"⚠️ {len(unmatched)} email(s) not found"):
-                for e in unmatched:
-                    st.markdown(f"- `{e}`")
+            with st.expander(f"⚠️ {len(unmatched)} not found"):
+                for e, k in unmatched:
+                    st.markdown(f"- `{e}` ({k})")
 
         if matched:
             st.markdown('<div class="section-label">Matched Workers</div>', unsafe_allow_html=True)
             for person in matched:
                 render_worker_row(person, use_color, key_prefix="bl_")
 
-            st.markdown('<div class="section-label">Download Batch Results</div>',
+            st.markdown('<div class="section-label">Print or Download Transcripts</div>',
                         unsafe_allow_html=True)
+            st.caption("Tip: click 👁 on any row above to preview, print or download just that person.")
             bcol1, bcol2 = st.columns(2)
 
             with bcol1:
-                if st.button(f"📄 Merged PDF ({len(matched)} workers)",
+                if st.button(f"🖨️ Print / 📄 Merged PDF ({len(matched)} workers)",
                               use_container_width=True, type="primary"):
                     with st.spinner("Building transcripts…"):
                         batch_merged = merge_pdfs(
                             [build_person_pdf(p, use_color=use_color) for p in matched]
                         )
+                    print_pdf_button(batch_merged, f"🖨️ Print all {len(matched)} transcripts")
                     st.download_button(
                         "⬇️ Download Batch_Transcripts.pdf",
                         data=batch_merged, file_name="Batch_Transcripts.pdf",
@@ -596,7 +646,7 @@ elif page == "Batch Lookup":
                         mime="application/zip", use_container_width=True,
                     )
         else:
-            st.warning("None of the entered emails matched any workers in the uploaded CSVs.")
+            st.warning("Nothing you entered matched any workers in the loaded CSVs.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

@@ -586,3 +586,126 @@ def generate_pdfs_merged(groups: dict,
     out_buf = io.BytesIO()
     writer.write(out_buf)
     return out_buf.getvalue()
+
+
+# ── Email drafts (.eml) — one per student, certificates attached ─────────────
+
+DEFAULT_EMAIL_SUBJECT = "Your LIUNA Training Certificate"
+
+DEFAULT_EMAIL_BODY = """Hi {first_name},
+
+Congratulations on completing your online training! Your certificate(s) for the following class(es) are attached:
+
+{classes}
+
+Please keep a copy for your records.
+
+Thank you,
+LIUNA Training of Michigan
+(517) 625-4919"""
+
+
+def _looks_like_email(s: str) -> bool:
+    import re as _re
+    return bool(_re.fullmatch(r"[\w.+\-]+@[\w\-]+(?:\.[\w\-]+)*\.[A-Za-z]{2,}", (s or "").strip()))
+
+
+def _nice_name(upper_name: str) -> str:
+    """'BRIAN WASHINGTON' -> 'Brian Washington' (certs store names in caps)."""
+    return " ".join(w.capitalize() for w in (upper_name or "").split())
+
+
+def _fill(template: str, group: dict) -> str:
+    nice    = _nice_name(group["name"])
+    first   = nice.split()[0] if nice else "there"
+    classes = "\n".join(f"  • {c['cls']}" for c in group["certs"])
+    return (template.replace("{first_name}", first)
+                    .replace("{name}", nice)
+                    .replace("{classes}", classes))
+
+
+def build_email_items(groups: dict,
+                      subject: str = DEFAULT_EMAIL_SUBJECT,
+                      body: str = DEFAULT_EMAIL_BODY,
+                      separate_attachments: bool = False,
+                      org_name: str = "LIUNA Training of Michigan",
+                      org_addr: str = "11155 Beardslee Road",
+                      org_city: str = "Perry, MI 48872",
+                      org_phone: str = "(517) 625-4919",
+                      dir_name: str = "Jeff Smrz",
+                      dir_title: str = "Director"):
+    """
+    One entry per student with an email address:
+      {"name", "email", "subject", "body", "pdfs": [(filename, bytes), ...]}
+    plus a list of student names that have no email. Everything in memory.
+
+    subject / body may use {first_name}, {name} and {classes}.
+    separate_attachments=False → one PDF per student (one page per class);
+    True → one PDF per class.
+    """
+    org = dict(org_name=org_name, org_addr=org_addr, org_city=org_city,
+               org_phone=org_phone, dir_name=dir_name, dir_title=dir_title)
+    items, no_email = [], []
+    for key, group in sorted(groups.items(), key=lambda kv: kv[1]["name"]):
+        nice = _nice_name(group["name"]) or key
+        to   = (group.get("mid") or "").strip()
+        if not _looks_like_email(to):
+            no_email.append(nice)
+            continue
+        if separate_attachments:
+            pdfs = []
+            for cert in group["certs"]:
+                cls = re.sub(r"[^\w\- ]", "", cert["cls"]).strip() or "Certificate"
+                pdfs.append((f"{nice} - {cls}.pdf", _build_pdf_bytes(dict(group, certs=[cert]), **org)))
+        else:
+            pdfs = [(f"{nice} - LIUNA Certificate.pdf", _build_pdf_bytes(group, **org))]
+        items.append({"name": nice, "email": to,
+                      "subject": _fill(subject, group), "body": _fill(body, group),
+                      "pdfs": pdfs})
+    return items, no_email
+
+
+def email_items_to_eml_zip(items: list) -> bytes:
+    """
+    ZIP of one draft email (.eml) per student with certificates attached.
+    Marked "X-Unsent: 1" so desktop Outlook opens each as a new, editable
+    message with a Send button. Nothing is sent.
+    """
+    from email.message import EmailMessage
+    from email.policy import SMTP
+    used, zip_buf = {}, io.BytesIO()
+    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for it in items:
+            msg = EmailMessage()
+            msg["To"]       = it["email"]
+            msg["Subject"]  = it["subject"]
+            msg["X-Unsent"] = "1"
+            msg.set_content(it["body"])
+            for fname, pdf in it["pdfs"]:
+                msg.add_attachment(pdf, maintype="application", subtype="pdf", filename=fname)
+            base = re.sub(r"[^\w\- ]", "", it["name"]).strip() or "Student"
+            used[base] = used.get(base, 0) + 1
+            fname = base if used[base] == 1 else f"{base} ({used[base]})"
+            zf.writestr(f"{fname}.eml", msg.as_bytes(policy=SMTP))
+    return zip_buf.getvalue()
+
+
+def build_email_drafts_zip(groups: dict, **kwargs):
+    """Convenience wrapper: returns (zip_bytes, drafted_names, no_email_names)."""
+    items, no_email = build_email_items(groups, **kwargs)
+    return email_items_to_eml_zip(items), [i["name"] for i in items], no_email
+
+
+def compose_link(platform: str, to: str, subject: str, body: str) -> str:
+    """
+    Link that opens a new, pre-filled email (no attachment — web mail can't
+    accept one from a link). platform: "gmail", "outlook_web" or "mailto".
+    """
+    from urllib.parse import quote
+    q = lambda s: quote(s, safe="")
+    if platform == "gmail":
+        return f"https://mail.google.com/mail/?view=cm&fs=1&to={q(to)}&su={q(subject)}&body={q(body)}"
+    if platform == "outlook_web":
+        return (f"https://outlook.office.com/mail/deeplink/compose?to={q(to)}"
+                f"&subject={q(subject)}&body={q(body)}")
+    return f"mailto:{quote(to, safe='@')}?subject={q(subject)}&body={q(body)}"

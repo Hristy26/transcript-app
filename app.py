@@ -19,6 +19,7 @@ import base64
 import io
 import hashlib
 import re
+import zipfile
 
 import pandas as pd
 import streamlit as st
@@ -48,6 +49,11 @@ from liuna_cert_generator import (
     generate_pdfs_merged,
     generate_single_pdf,
     safe_filename,
+    build_email_items,
+    email_items_to_eml_zip,
+    compose_link,
+    DEFAULT_EMAIL_SUBJECT,
+    DEFAULT_EMAIL_BODY,
 )
 from learners_summary import LearnersReport
 
@@ -195,11 +201,20 @@ NAV_ITEMS = [
     ("⚙️", "Settings"),
 ]
 
+# ── Email platforms (Settings → Email Platform) ───────────────────────────────
+EMAIL_PLATFORMS = {
+    "Outlook (desktop app)":            "outlook_desktop",
+    "Gmail":                            "gmail",
+    "Outlook on the web / New Outlook": "outlook_web",
+    "Default email app on this computer": "mailto",
+}
+
 # ── Session state defaults ────────────────────────────────────────────────────
 for key, default in [
     ("people",    []),
     ("courses",   []),
     ("use_color", True),
+    ("email_platform", "Outlook (desktop app)"),
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -914,6 +929,83 @@ elif page == "LIUNA Certificates":
                     data=single_bytes, file_name=single_fname,
                     mime="application/pdf", use_container_width=True,
                 )
+
+        # ── Email certificates ───────────────────────────────────────────────
+        platform_label = st.session_state.email_platform
+        platform = EMAIL_PLATFORMS.get(platform_label, "outlook_desktop")
+        st.markdown('<div class="section-label">Email Certificates</div>', unsafe_allow_html=True)
+        if platform == "outlook_desktop":
+            how = ("Builds one ready-to-send email per student, addressed to them with their "
+                   "certificate(s) <b>already attached</b>. Download the ZIP, unzip it, and "
+                   "double-click each file — it opens in Outlook as a new email. Check it and "
+                   "click <b>Send</b>.")
+        else:
+            how = (f"For each student: click <b>✉️ Open</b> to start a new {platform_label} email "
+                   "that's already addressed and filled in, then click <b>⬇️ Certificate</b> and "
+                   "drag the PDF into the email. (Web email can't take attachments from a link.) "
+                   "Check it and click <b>Send</b>.")
+        st.markdown(f"""<div class="info-card"><h4>✉️ Email with: {platform_label}</h4>
+        <p>{how} Nothing is sent automatically. Change the email platform in
+        <b>⚙️ Settings</b>.</p></div>""", unsafe_allow_html=True)
+
+        email_subject = st.text_input("Subject", value=DEFAULT_EMAIL_SUBJECT, key="liuna_email_subject")
+        email_body = st.text_area("Message", value=DEFAULT_EMAIL_BODY, height=260, key="liuna_email_body")
+        st.caption("These fill in automatically for each student: **{first_name}**, **{name}**, "
+                   "and **{classes}** (a list of the classes they passed).")
+        separate = st.radio(
+            "Attachments", ["One PDF with all their certificates", "A separate PDF for each class"],
+            horizontal=True, key="liuna_email_attach",
+        ) == "A separate PDF for each class"
+
+        n_with_email = sum(1 for g in groups.values() if "@" in (g.get("mid") or ""))
+        # Emails are prepared once and kept for this session, so the download
+        # buttons below don't rebuild every PDF each time one is clicked.
+        email_sig = (tuple(sorted((k, len(g["certs"])) for k, g in groups.items())),
+                     email_subject, email_body, separate, tuple(sorted(org_kwargs.items())))
+        if st.session_state.get("email_pack_sig") != email_sig:
+            st.session_state.pop("email_pack", None)
+
+        if st.button(f"✉️ Prepare Emails ({n_with_email} students)",
+                     use_container_width=True, type="primary", disabled=n_with_email == 0):
+            with st.spinner("Preparing emails and certificates…"):
+                items, no_email = build_email_items(
+                    groups, subject=email_subject, body=email_body,
+                    separate_attachments=separate, **org_kwargs,
+                )
+            st.session_state.email_pack = (items, no_email)
+            st.session_state.email_pack_sig = email_sig
+
+        if n_with_email == 0:
+            st.info("None of these students have an email address in the CSV "
+                    "(the older LIUNA class-information format only has member IDs).")
+
+        pack = st.session_state.get("email_pack")
+        if pack:
+            items, no_email = pack
+            st.success(f"✅ {len(items)} email(s) ready.")
+            if platform == "outlook_desktop":
+                st.download_button(
+                    "⬇️ Download LIUNA_Certificate_Emails.zip",
+                    data=email_items_to_eml_zip(items), file_name="LIUNA_Certificate_Emails.zip",
+                    mime="application/zip", use_container_width=True,
+                )
+            else:
+                for n_i, it in enumerate(items):
+                    c1, c2, c3 = st.columns([3, 1.4, 1.6])
+                    c1.markdown(f"**{it['name']}**  \n<span style='color:#888;font-size:0.85em'>"
+                                f"{it['email']}</span>", unsafe_allow_html=True)
+                    c2.link_button("✉️ Open", compose_link(platform, it["email"], it["subject"], it["body"]),
+                                   use_container_width=True)
+                    for n_p, (fname, pdf) in enumerate(it["pdfs"]):
+                        label = "⬇️ Certificate" if len(it["pdfs"]) == 1 else f"⬇️ {fname.split(' - ', 1)[-1][:-4]}"
+                        c3.download_button(label, data=pdf, file_name=fname,
+                                           mime="application/pdf", use_container_width=True,
+                                           key=f"email_pdf_{n_i}_{n_p}")
+            if no_email:
+                st.warning(f"No email address for {len(no_email)} student(s) — "
+                           "use Print One Certificate above for them:  \n"
+                           + ", ".join(no_email))
+
     else:
         st.markdown("""
         <div class="upload-hint">⬆️ Upload one or more class CSVs above to get started</div>
@@ -1112,6 +1204,21 @@ elif page == "Settings":
         value=st.session_state.use_color,
     )
     st.session_state.use_color = use_color
+
+    st.markdown('<div class="section-label">Email Platform</div>', unsafe_allow_html=True)
+    # Stored under its own name (not the widget key): Streamlit forgets a
+    # widget's value once you leave the page, which would undo the choice.
+    def _save_platform():
+        st.session_state.email_platform = st.session_state._email_platform_widget
+    st.selectbox(
+        "Email platform for sending LIUNA certificates",
+        list(EMAIL_PLATFORMS), key="_email_platform_widget",
+        index=list(EMAIL_PLATFORMS).index(st.session_state.email_platform),
+        on_change=_save_platform,
+        help="Outlook (desktop app) gets ready-to-send drafts with the certificates already "
+             "attached. Web email (Gmail, Outlook on the web) can't take attachments from a "
+             "link, so you get a pre-filled email plus a download button for each certificate.",
+    )
 
     st.markdown('<div class="section-label">Course Keyword Detection</div>', unsafe_allow_html=True)
     st.markdown("""<div class="info-card"><h4>How course names are auto-detected</h4>

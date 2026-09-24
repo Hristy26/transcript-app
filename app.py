@@ -34,6 +34,10 @@ from utils import (
     parse_email_list,
     parse_lookup_list,
     lookup_people,
+    format_report_title,
+    report_filename,
+    now_stamp,
+    data_date_span,
     process_files,
 )
 from liuna_cert_generator import (
@@ -221,6 +225,12 @@ def load_csvs(uploaded_files) -> None:
             seen.add(h)
             shared.append((f.name, data))
     st.session_state.loaded_files = shared
+    # Default report dates = earliest → latest date found in these CSVs
+    start, end = data_date_span(people)
+    if start:
+        st.session_state.span_default = (start, end)
+    st.session_state._just_loaded = len(people)
+    st.rerun()  # redraw the sidebar (report dates, loaded-data box) right away
 
 
 def require_data(page_key: str) -> bool:
@@ -230,6 +240,10 @@ def require_data(page_key: str) -> bool:
     Data loaded  → show what's loaded, with a collapsed uploader to swap files.
     """
     has_data = bool(st.session_state.people)
+    just = st.session_state.pop("_just_loaded", None)
+    if just:
+        st.success(f"✅ Loaded {just} workers. Report dates were filled in from the CSV — "
+                   "check them in the sidebar under **Report Period**.")
     if has_data:
         n_files = len(st.session_state.get("loaded_names", [])) or "?"
         box = st.expander(
@@ -302,15 +316,52 @@ with st.sidebar:
         """, unsafe_allow_html=True)
 
 
+# ── Report period (sidebar) ───────────────────────────────────────────────────
+def _month_span(d):
+    import calendar
+    return d.replace(day=1), d.replace(day=calendar.monthrange(d.year, d.month)[1])
+
+
+with st.sidebar:
+    from datetime import date as _date
+    st.markdown('<div class="nav-section-label">Report Period</div>', unsafe_allow_html=True)
+    st.session_state.setdefault("report_name", "Learners Transcript CSV Report")
+    st.text_input("Report name", key="report_name")
+    _default = st.session_state.get("span_default") or _month_span(_date.today())
+    # No widget key on purpose: when new CSVs change the default, the picker
+    # resets to it; otherwise whatever you typed is kept.
+    _rng = st.date_input("Report dates (from – to)", value=_default, format="MM/DD/YYYY")
+    if isinstance(_rng, (tuple, list)) and len(_rng) == 2:
+        st.session_state.report_range = tuple(_rng)
+    elif "report_range" not in st.session_state:
+        st.session_state.report_range = tuple(_default)
+    st.caption("Printed on transcripts and used as the file name:  \n**"
+               + format_report_title(st.session_state.report_name, *st.session_state.report_range) + "**")
+
+
+def report_title() -> str:
+    return format_report_title(st.session_state.get("report_name", ""),
+                               *st.session_state.get("report_range", (None, None)))
+
+
+def report_base() -> str:
+    return report_filename(report_title())
+
+
+def pdf_opts() -> dict:
+    """Title + Michigan-time stamp for every transcript PDF built right now."""
+    return {"report_title": report_title(), "printed_at": now_stamp()}
+
+
 # ── Preview modal ─────────────────────────────────────────────────────────────
 @st.dialog("Transcript Preview", width="large")
 def show_preview_modal(person: dict, use_color: bool) -> None:
     # Flatten to one line: indented/blank lines inside the HTML make Markdown
     # show part of the preview as raw code instead of rendering it.
-    preview_html = " ".join(line.strip() for line in build_preview_html(person).splitlines())
+    preview_html = " ".join(line.strip() for line in build_preview_html(person, report_title()).splitlines())
     st.markdown(preview_html, unsafe_allow_html=True)
     st.markdown("")
-    pdf_bytes = build_person_pdf(person, use_color=use_color)
+    pdf_bytes = build_person_pdf(person, use_color=use_color, **pdf_opts())
     safe_name = re.sub(r"[^\w\-]", "_", person["name"] or "transcript")
     dcol, pcol = st.columns(2)
     with dcol:
@@ -404,6 +455,7 @@ if page == "Upload & Process":
 
     if uploaded_files:
         load_csvs(uploaded_files)
+        st.session_state.pop("_just_loaded", None)  # this page shows its own summary
         people  = st.session_state.people
         courses = st.session_state.courses
 
@@ -416,7 +468,8 @@ if page == "Upload & Process":
             <div class="stat-box"><div class="stat-num">{len(people) - passed}</div><div class="stat-label">In Progress</div></div>
         </div>""", unsafe_allow_html=True)
 
-        st.success(f"✅ Loaded {len(uploaded_files)} file(s). Use the sidebar to navigate.")
+        st.success(f"✅ Loaded {len(uploaded_files)} file(s). Use the sidebar to navigate. "
+                   "Report dates were filled in from the CSV — check them in the sidebar under **Report Period**.")
 
         st.markdown('<div class="section-label">Detected Courses</div>', unsafe_allow_html=True)
         for i, c in enumerate(courses, 1):
@@ -515,10 +568,10 @@ elif page == "Generate PDFs":
                     unsafe_allow_html=True)
         if st.button(f"Build Merged PDF ({total} workers)", use_container_width=True, type="primary"):
             with st.spinner(f"Building {total} transcripts…"):
-                merged = merge_pdfs([build_person_pdf(p, use_color=color_toggle) for p in people])
+                merged = merge_pdfs([build_person_pdf(p, use_color=color_toggle, **pdf_opts()) for p in people])
             st.download_button(
-                "⬇️ Download All_Transcripts.pdf",
-                data=merged, file_name="All_Transcripts.pdf",
+                "⬇️ Download PDF",
+                data=merged, file_name=f"{report_base()}.pdf",
                 mime="application/pdf", use_container_width=True,
             )
 
@@ -528,10 +581,10 @@ elif page == "Generate PDFs":
                     unsafe_allow_html=True)
         if st.button("Package Individual PDFs (ZIP)", use_container_width=True):
             with st.spinner("Packaging…"):
-                zip_bytes = build_zip(people, use_color=color_toggle)
+                zip_bytes = build_zip(people, use_color=color_toggle, **pdf_opts())
             st.download_button(
-                "⬇️ Download Transcripts.zip",
-                data=zip_bytes, file_name="Transcripts.zip",
+                "⬇️ Download ZIP",
+                data=zip_bytes, file_name=f"{report_base()}.zip",
                 mime="application/zip", use_container_width=True,
             )
 
@@ -627,22 +680,22 @@ elif page == "Batch Lookup":
                               use_container_width=True, type="primary"):
                     with st.spinner("Building transcripts…"):
                         batch_merged = merge_pdfs(
-                            [build_person_pdf(p, use_color=use_color) for p in matched]
+                            [build_person_pdf(p, use_color=use_color, **pdf_opts()) for p in matched]
                         )
                     print_pdf_button(batch_merged, f"🖨️ Print all {len(matched)} transcripts")
                     st.download_button(
-                        "⬇️ Download Batch_Transcripts.pdf",
-                        data=batch_merged, file_name="Batch_Transcripts.pdf",
+                        "⬇️ Download PDF",
+                        data=batch_merged, file_name=f"{report_base()}_Batch.pdf",
                         mime="application/pdf", use_container_width=True,
                     )
 
             with bcol2:
                 if st.button(f"🗂 Individual ZIP ({len(matched)} PDFs)", use_container_width=True):
                     with st.spinner("Packaging…"):
-                        zip_bytes = build_zip(matched, use_color=use_color)
+                        zip_bytes = build_zip(matched, use_color=use_color, **pdf_opts())
                     st.download_button(
-                        "⬇️ Download Batch_Transcripts.zip",
-                        data=zip_bytes, file_name="Batch_Transcripts.zip",
+                        "⬇️ Download ZIP",
+                        data=zip_bytes, file_name=f"{report_base()}_Batch.zip",
                         mime="application/zip", use_container_width=True,
                     )
         else:
@@ -894,6 +947,18 @@ elif page == "Learner Summary":
             st.error(f"Couldn't parse this CSV: {exc}")
             st.stop()
 
+        # New learner export → default the sidebar report dates to its month
+        _sig = (summary_file.name, summary_file.size)
+        if st.session_state.get("summary_sig") != _sig:
+            st.session_state.summary_sig = _sig
+            try:
+                from datetime import datetime as _dt
+                _m = _dt.strptime(report.report_month, "%B %Y").date()
+                st.session_state.span_default = _month_span(_m)
+                st.rerun()
+            except ValueError:
+                pass
+
         st.markdown(f"""
         <div class="stat-row">
             <div class="stat-box"><div class="stat-num">{report.total_students}</div><div class="stat-label">Students</div></div>
@@ -979,10 +1044,10 @@ elif page == "Learner Summary":
             if st.button(f"Build Merged PDF ({len(transcript_people)} students)",
                           use_container_width=True, type="primary", key="learner_summary_merged_btn"):
                 with st.spinner(f"Building {len(transcript_people)} transcripts…"):
-                    merged = merge_pdfs([build_person_pdf(p, use_color=transcript_color) for p in transcript_people])
+                    merged = merge_pdfs([build_person_pdf(p, use_color=transcript_color, **pdf_opts()) for p in transcript_people])
                 st.download_button(
-                    "⬇️ Download All_Transcripts.pdf",
-                    data=merged, file_name="All_Transcripts.pdf",
+                    "⬇️ Download PDF",
+                    data=merged, file_name=f"{report_base()}.pdf",
                     mime="application/pdf", use_container_width=True, key="learner_summary_merged_dl",
                 )
 
@@ -993,10 +1058,10 @@ elif page == "Learner Summary":
             if st.button(f"Package Individual PDFs ({len(transcript_people)} students)",
                           use_container_width=True, key="learner_summary_zip_btn"):
                 with st.spinner("Packaging…"):
-                    zip_bytes = build_zip(transcript_people, use_color=transcript_color)
+                    zip_bytes = build_zip(transcript_people, use_color=transcript_color, **pdf_opts())
                 st.download_button(
-                    "⬇️ Download Transcripts.zip",
-                    data=zip_bytes, file_name="Transcripts.zip",
+                    "⬇️ Download ZIP",
+                    data=zip_bytes, file_name=f"{report_base()}.zip",
                     mime="application/zip", use_container_width=True, key="learner_summary_zip_dl",
                 )
     else:

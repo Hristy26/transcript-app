@@ -163,8 +163,16 @@ def process_files(uploaded_files) -> tuple[list[dict], list[str]]:
 
 # ── PDF builder ───────────────────────────────────────────────────────────────
 
-def build_person_pdf(person: dict, use_color: bool = True) -> bytes:
-    """Render a single training-transcript PDF and return raw bytes."""
+def build_person_pdf(person: dict, use_color: bool = True,
+                     report_title: str | None = None,
+                     printed_at: str | None = None) -> bytes:
+    """
+    Render a single training-transcript PDF and return raw bytes.
+
+    report_title — replaces the header subtitle, e.g.
+                   "Learners Transcript CSV Report from July 1 to July 31, 2026"
+    printed_at   — optional date/time stamped bottom-right on every page
+    """
 
     # ── Colour palette ────────────────────────────────────────────────────
     if use_color:
@@ -213,8 +221,8 @@ def build_person_pdf(person: dict, use_color: bool = True) -> bytes:
 
     # ── Header banner ─────────────────────────────────────────────────────
     header_table = Table(
-        [[Paragraph("TRAINING TRANSCRIPT", title_s)],
-         [Paragraph("Construction Workforce Safety Training", sub_s)]],
+        [[Paragraph("ONLINE TRAINING TRANSCRIPT", title_s)],
+         [Paragraph(report_title or "Construction Workforce Safety Training", sub_s)]],
         colWidths=[7.2 * inch],
     )
     header_table.setStyle(TableStyle([
@@ -296,9 +304,62 @@ def build_person_pdf(person: dict, use_color: bool = True) -> bytes:
         footer_s,
     ))
 
-    doc.build(story)
+    def _stamp(canvas, _doc):
+        # Date/time stamp, bottom-right of every page
+        if printed_at:
+            canvas.saveState()
+            canvas.setFont("Helvetica", 8)
+            canvas.setFillColor(colors.HexColor("#666666"))
+            canvas.drawRightString(letter[0] - 0.65 * inch, 0.4 * inch, f"Printed {printed_at}")
+            canvas.restoreState()
+
+    doc.build(story, onFirstPage=_stamp, onLaterPages=_stamp)
     buf.seek(0)
     return buf.read()
+
+
+# ── Report title / timestamp helpers ──────────────────────────────────────────
+
+def format_report_title(name: str, start, end) -> str:
+    """'Learners Transcript CSV Report from July 1 to July 31, 2026'."""
+    name = (name or "").strip() or "Learners Transcript CSV Report"
+    if start is None or end is None:
+        return name
+    if start.year == end.year:
+        span = f"{start:%B} {start.day} to {end:%B} {end.day}, {end.year}"
+    else:
+        span = f"{start:%B} {start.day}, {start.year} to {end:%B} {end.day}, {end.year}"
+    return f"{name} from {span}"
+
+
+def report_filename(title: str) -> str:
+    """Safe file name (no extension) built from the report title."""
+    return re.sub(r"_+", "_", re.sub(r"[^\w\-]", "_", title)).strip("_") or "Transcripts"
+
+
+def now_stamp() -> str:
+    """Current Michigan time, e.g. '09/24/2026 3:05 PM' (the server may run on UTC)."""
+    from datetime import datetime
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("America/Detroit"))
+    except Exception:
+        now = datetime.now()
+    return now.strftime("%m/%d/%Y ") + now.strftime("%I:%M %p").lstrip("0")
+
+
+def data_date_span(people: list[dict]):
+    """Earliest and latest course date found in the loaded data (or (None, None))."""
+    from datetime import datetime
+    found = []
+    for p in people:
+        for c in p["courses"]:
+            for d in (c.get("started_date"), c.get("completion_date")):
+                try:
+                    found.append(datetime.strptime(d, "%m/%d/%Y").date())
+                except (TypeError, ValueError):
+                    pass
+    return (min(found), max(found)) if found else (None, None)
 
 
 # ── PDF merger ────────────────────────────────────────────────────────────────
@@ -318,7 +379,7 @@ def merge_pdfs(pdf_bytes_list: list[bytes]) -> bytes:
 
 # ── ZIP builder ───────────────────────────────────────────────────────────────
 
-def build_zip(people: list[dict], use_color: bool = True) -> bytes:
+def build_zip(people: list[dict], use_color: bool = True, **pdf_opts) -> bytes:
     """Package one PDF per person into a ZIP archive, returned as bytes.
 
     Person names aren't guaranteed unique (two different people can share the
@@ -330,7 +391,7 @@ def build_zip(people: list[dict], use_color: bool = True) -> bytes:
     used_names: dict[str, int] = {}
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for person in people:
-            pdf_bytes = build_person_pdf(person, use_color=use_color)
+            pdf_bytes = build_person_pdf(person, use_color=use_color, **pdf_opts)
             base_name = re.sub(r"[^\w\-]", "_", person["name"] or "transcript")
             count = used_names.get(base_name, 0) + 1
             used_names[base_name] = count
@@ -442,7 +503,7 @@ def lookup_people(entries: list[str], people: list[dict]) -> list[tuple[str, str
 
 # ── HTML transcript preview ───────────────────────────────────────────────────
 
-def build_preview_html(person: dict) -> str:
+def build_preview_html(person: dict, report_title: str | None = None) -> str:
     """Return an HTML string that visually mimics the PDF transcript layout."""
     name_display = person["name"] or person["email"]
     ssn_display  = f"\u2022\u2022\u2022\u2022 {person['ssn4']}" if person.get("ssn4") else "\u2014"
@@ -466,8 +527,8 @@ def build_preview_html(person: dict) -> str:
     return f"""
     <div class="preview-wrap">
         <div class="preview-hdr">
-            <h3>TRAINING TRANSCRIPT</h3>
-            <p>Construction Workforce Safety Training</p>
+            <h3>ONLINE TRAINING TRANSCRIPT</h3>
+            <p>{report_title or "Construction Workforce Safety Training"}</p>
         </div>
         <div class="preview-meta">
             <div class="preview-cell">

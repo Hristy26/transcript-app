@@ -43,6 +43,7 @@ from reportlab.lib.pagesizes import landscape, letter
 from reportlab.lib import colors
 from reportlab.pdfgen import canvas as rl_canvas
 from reportlab.pdfbase import pdfmetrics
+from reportlab.lib.utils import ImageReader
 
 
 # ── Column indices (0-based) ────────────────────────────────────────────────
@@ -70,6 +71,20 @@ MID_GRAY   = colors.HexColor("#666666")
 LIGHT_GRAY = colors.HexColor("#888888")
 RULE_GRAY  = colors.HexColor("#CCCCCC")
 WHITE      = colors.white
+
+# ── Logo (bottom-left corner) ────────────────────────────────────────────────
+# Lives next to this file so it travels with the repo (works locally and on
+# Streamlit Cloud). If it's ever missing, the corner is simply left blank.
+LOGO_PATH = Path(__file__).parent / "liuna_logo.png"
+LOGO_W    = 130  # width in points (72 pt = 1 inch); height keeps the aspect ratio
+_logo_reader = None
+
+
+def _get_logo():
+    global _logo_reader
+    if _logo_reader is None and LOGO_PATH.is_file():
+        _logo_reader = ImageReader(str(LOGO_PATH))
+    return _logo_reader
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -200,16 +215,17 @@ def draw_cert(c: rl_canvas.Canvas,
 
     # (text, font, size, color, leading, gap-after-this-row)
     rows = [
-        ((org_name or "LIUNA Training of Michigan").upper(), "Times-Bold",   32, BLACK,      38, 18),
+        ((org_name or "LIUNA Training of Michigan").upper(), "Times-Bold",   32, BLACK,      32, 0),
         ((org_addr or "").upper(),                            "Helvetica",    11, DARK_GRAY,  14, 0),
         ((org_city or "").upper(),                            "Helvetica",    11, DARK_GRAY,  14, 0),
         (org_phone or "",                                     "Helvetica",    11, DARK_GRAY,  14, 30),
         ("DECLARES THAT",                                     "Times-Italic", 13, LIGHT_GRAY, 16, 26),
-        (name or "STUDENT NAME",                              "Times-Bold",   26, BLACK,      30, 16),
-        (f"ON {fmt_date(date)}",                               "Helvetica",    13, DARK_GRAY,  16, 8),
-        (f"COMPLETED {hrs} HOURS OF",                          "Helvetica",    13, DARK_GRAY,  16, 16),
-        (cls.upper(),                                          "Times-Bold",   22, BLACK,      26, 16),
-        ("ONLINE TRAINING",                                    "Helvetica",    13, DARK_GRAY,  16, 24),
+        # The sentence + date sit with equal white space above (below the
+        # student's name) and below (above the class name).
+        (name or "STUDENT NAME",                              "Times-Bold",   26, BLACK,      30, 5),
+        ("HAS SUCCESSFULLY COMPLETED ONLINE TRAINING",         "Helvetica",    13, DARK_GRAY,  16, 8),
+        (f"ON {fmt_date(date)}",                               "Helvetica",    13, DARK_GRAY,  16, 44),
+        (cls.upper(),                                          "Times-Bold",   26, BLACK,      30, 13),
         (RULE,                                                 None,           0,  None,       0, 20),
         *disc_rows,
         (SIGN_ROW,                                             None,           0,  None,       44, 0),
@@ -235,7 +251,7 @@ def draw_cert(c: rl_canvas.Canvas,
             c.setLineWidth(0.75)
             c.line(65, y - leading / 2, W - 65, y - leading / 2)
         elif text is SIGN_ROW:
-            # Director signature resting on the line, EasyGenerator logo
+            # Director signature resting on the line, LIUNA logo
             # aligned to the same row on the left.
             line_y = y - 6
 
@@ -251,16 +267,13 @@ def draw_cert(c: rl_canvas.Canvas,
             c.setFillColor(DARK_GRAY)
             c.drawString(W - 330, line_y - 15, (dir_title or "DIRECTOR").upper())
 
-            c.setFillColor(colors.HexColor("#F26522"))
-            c.ellipse(60, line_y - 36, 100, line_y - 4, fill=1, stroke=0)
-            c.setFillColor(WHITE)
-            c.setFont("Helvetica-Bold", 9)
-            c.drawCentredString(80, line_y - 17, "easy")
-            c.setFont("Helvetica", 8)
-            c.drawCentredString(80, line_y - 28, "gen")
-            c.setFillColor(LIGHT_GRAY)
-            c.setFont("Helvetica", 10)
-            c.drawString(106, line_y - 24, "easygenerator")
+            logo = _get_logo()
+            if logo is not None:
+                iw, ih = logo.getSize()
+                logo_h = LOGO_W * ih / iw
+                # bottom of the logo lines up with the director title text
+                c.drawImage(logo, 55, line_y - 18, width=LOGO_W, height=logo_h,
+                            mask="auto")
         else:
             c.setFont(font, size)
             c.setFillColor(color)

@@ -16,10 +16,8 @@ LIUNA certificate drawing lives in liuna_cert_generator.py.
 """
 
 import base64
-import io
 import hashlib
 import re
-import zipfile
 
 import pandas as pd
 import streamlit as st
@@ -32,7 +30,6 @@ from utils import (
     build_preview_html,
     build_zip,
     merge_pdfs,
-    parse_email_list,
     parse_lookup_list,
     lookup_people,
     format_report_title,
